@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import dash
 
 DB_PATH = 'bolao_f1Prod.db'
-JWT_SECRET = st.secrets["JWT_SECRET"]
+JWT_SECRET = os.environ.get("JWT_SECRET")
 JWT_EXP_MINUTES = 120
 
 REGULAMENTO = """
@@ -112,9 +112,9 @@ senha_hash TEXT,
 perfil TEXT,
 status TEXT DEFAULT 'Ativo',
 faltas INTEGER DEFAULT 0)''')
-    usuario_master = st.secrets["usuario_master"]
-    email_master = st.secrets["email_master"]
-    senha_master = st.secrets["senha_master"]
+    usuario_master = os.environ.get("usuario_master")
+    email_master = os.environ.get("email_master")
+    senha_master = os.environ.get("senha_master")
     senha_hash = bcrypt.hashpw(senha_master.encode(), bcrypt.gensalt())
     c.execute('''INSERT OR IGNORE INTO usuarios (nome, email, senha_hash, perfil, status, faltas)
 VALUES (?, ?, ?, ?, ?, ?)''',
