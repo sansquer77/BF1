@@ -73,13 +73,13 @@ Cada participante deve indicar o campeão e o vice do campeonato de pilotos e a 
 A pontuação será 150 pontos se acertar o campeão, 100 se acertar o vice, 80 acertando equipe – Que serão somados à pontuação ao final do campeonato.
 
 Cada participante possui 15 (quinze) fichas para serem apostadas a cada corrida da seguinte maneira:  
-A aposta deve conter no mínimo 3 pilotos de equipes diferentes (Apostou no Hamilton, não pode apostar no Leclerc por ex.)  
-Sem limite de ficha por piloto, vale 13 / 1 / 1, desde que respeitada a regra acima.  
-As corridas Sprint seguem a mesma regra, sendo consideradas provas válidas para a pontuação.  
+- A aposta deve conter no mínimo 3 pilotos de equipes diferentes (Apostou no Hamilton, não pode apostar no Leclerc por ex.)  
+- Sem limite de ficha por piloto, vale 13 / 1 / 1, desde que respeitada a regra acima.  
+- As corridas Sprint seguem a mesma regra, sendo consideradas provas válidas para a pontuação.  
 Deve ser indicado o piloto que irá chegar em 11º lugar em todas as provas e em caso de acerto será computado 25 pontos.
 
 A pontuação do participante será a multiplicação das fichas apostadas em cada piloto pelo número de pontos que ele obteve na prova (fichas x pontos) + pontuação do 11º lugar.  
-As apostas serão lançadas na planilha de controle que está hospedada no OneDrive, sendo que o placar atualizado será publicado na página do grupo e no WhatsApp após as corridas.
+As apostas serão registradas neste sistema, sendo que o placar atualizado será atualizado na página específica após a atualização dos resultados das corridas.
 
 Critérios de Desempate
 
@@ -521,7 +521,7 @@ if st.session_state['pagina'] == "Painel do Participante" and st.session_state['
                     with col2:
                         if piloto_sel != "Nenhum":
                             valor_ficha = st.number_input(
-                                f"Fichas para {piloto_sel}", min_value=0, max_value=15,
+                                f"Fichas para {piloto_sel}", min_value=0, max_value=13,
                                 value=fichas_ant[i] if len(fichas_ant) > i else 0,
                                 key=f"fichas_aposta_{i}"
                             )
