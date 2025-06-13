@@ -9,6 +9,8 @@ import os
 import matplotlib.pyplot as plt
 import dash
 from db_utils import db_connect
+from championship_bets import main as championship_bets_main
+from championship_results import main as championship_results_main
 
 JWT_SECRET = st.secrets["JWT_SECRET"]
 JWT_EXP_MINUTES = 120
@@ -349,6 +351,8 @@ def menu_master():
         "Gestão do campeonato",
         "Gestão de Apostas",
         "Atualização de resultados",
+        "Apostas Campeonato",
+        "Resultado Campeonato",
         "Log de Apostas",
         "Classificação",
         "Dash F1",
@@ -361,6 +365,7 @@ def menu_admin():
         "Painel do Participante",
         "Gestão de Apostas",
         "Atualização de resultados",
+        "Apostas Campeonato",
         "Log de Apostas",
         "Classificação",
         "Dash F1",
@@ -370,6 +375,7 @@ def menu_admin():
 def menu_participante():
     return [
         "Painel do Participante",
+        "Apostas Campeonato",
         "Log de Apostas",
         "Classificação",
         "Dash F1",
@@ -407,8 +413,11 @@ if st.session_state['pagina'] == "Login":
                 if user:
                     token = generate_token(user[0], user[4], user[5])
                     st.session_state['token'] = token
+                    st.session_state['user_id'] = user[0]  # user[0] deve ser o ID do usuário
+                    st.session_state['user_role'] = user[4]  # perfil
                     st.session_state['pagina'] = "Painel do Participante"
                     st.success(f"Bem-vindo, {user[1]}!")
+                    st.write("Perfil do usuário:", st.session_state.get("user_role"))
                 else:
                     st.error("Usuário ou senha inválidos.")
         with col2:
@@ -972,15 +981,24 @@ if st.session_state['pagina'] == "Gestão de Apostas" and st.session_state['toke
         st.warning("Acesso restrito ao administrador/master.")
 
 # --- CLASSIFICAÇÃO ---
+import streamlit as st
+import pandas as pd
 import plotly.graph_objects as go
+from championship_utils import get_final_results, get_championship_bet
+
+# Página de Classificação
 if st.session_state['pagina'] == "Classificação" and st.session_state['token']:
     st.title("Classificação Geral do Bolão")
+
+    # Dados principais
     usuarios_df = get_usuarios_df()
     provas_df = get_provas_df()
     apostas_df = get_apostas_df()
     resultados_df = get_resultados_df()
     participantes = usuarios_df[usuarios_df['status'] == 'Ativo']
     provas_df = provas_df.sort_values('data')
+
+    # --------- 1. Pontuação das provas (como já faz) ----------
     tabela_classificacao = []
     tabela_detalhada = []
 
@@ -990,17 +1008,54 @@ if st.session_state['pagina'] == "Classificação" and st.session_state['token']
         total = sum([p for p in pontos_part if p is not None])
         tabela_classificacao.append({
             "Participante": part['nome'],
-            "Total de Pontos": total
+            "Pontos Provas": total
         })
         tabela_detalhada.append({
             "Participante": part['nome'],
             "Pontos por Prova": pontos_part
         })
 
-    df_class = pd.DataFrame(tabela_classificacao).sort_values("Total de Pontos", ascending=False).reset_index(drop=True)
-    st.subheader("Classificação Geral")
+    df_class = pd.DataFrame(tabela_classificacao).sort_values("Pontos Provas", ascending=False).reset_index(drop=True)
+    st.subheader("Classificação Geral - Apenas Provas")
     st.table(df_class)
 
+    # --------- 2. Pontuação final (Provas + Campeonato) ----------
+    resultado_campeonato = get_final_results()
+    tabela_classificacao_completa = []
+    destaques = []
+
+    for idx, part in participantes.iterrows():
+        apostas_part = apostas_df[apostas_df['usuario_id'] == part['id']].sort_values('prova_id')
+        pontos_part = calcular_pontuacao_lote(apostas_part, resultados_df, provas_df)
+        pontos_provas = sum([p for p in pontos_part if p is not None])
+
+        aposta = get_championship_bet(part['id'])
+        pontos_campeonato = 0
+        acertos = []
+        if resultado_campeonato and aposta:
+            if resultado_campeonato.get("champion") == aposta.get("champion"):
+                pontos_campeonato += 150
+                acertos.append("Campeão")
+            if resultado_campeonato.get("vice") == aposta.get("vice"):
+                pontos_campeonato += 100
+                acertos.append("Vice")
+            if resultado_campeonato.get("team") == aposta.get("team"):
+                pontos_campeonato += 80
+                acertos.append("Equipe")
+        total_geral = pontos_provas + pontos_campeonato
+        tabela_classificacao_completa.append({
+            "Participante": part['nome'],
+            "Pontos Provas": pontos_provas,
+            "Pontos Campeonato": pontos_campeonato,
+            "Total Geral": total_geral,
+            "Acertos Campeonato": ", ".join(acertos) if acertos else "-"
+        })
+
+    df_class_completo = pd.DataFrame(tabela_classificacao_completa).sort_values("Total Geral", ascending=False).reset_index(drop=True)
+    st.subheader("Classificação Final (Provas + Campeonato)")
+    st.table(df_class_completo)
+
+    # --------- 3. Pontuação por Prova (detalhe) ----------
     st.subheader("Pontuação por Prova")
     provas_nomes = provas_df['nome'].tolist()
     participantes_nomes = [p['Participante'] for p in tabela_detalhada]
@@ -1014,6 +1069,7 @@ if st.session_state['pagina'] == "Classificação" and st.session_state['token']
     df_cruzada = df_cruzada.reindex(columns=participantes_nomes, fill_value=0)
     st.dataframe(df_cruzada)
 
+    # --------- 4. Gráfico de evolução ----------
     st.subheader("Evolução da Pontuação Acumulada")
     if not df_cruzada.empty:
         fig = go.Figure()
@@ -1268,6 +1324,14 @@ if (
 # --- Dash F1 ---
 if st.session_state['pagina'] == "Dash F1":
     dash.main()
+
+# --- Apostas Campeonato ---
+if st.session_state['pagina'] == "Apostas Campeonato":
+    championship_bets_main()
+
+# --- Resultado Campeonato ---
+if st.session_state['pagina'] == "Resultado Campeonato":
+    championship_results_main()
 
 # --- Logoff ---
 if st.session_state['pagina'] == "Logout" and st.session_state['token']:
