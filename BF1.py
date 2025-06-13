@@ -8,9 +8,9 @@ import ast
 import os
 import matplotlib.pyplot as plt
 import dash
+from db_utils import db_connect
 
-DB_PATH = 'bolao_f1Prod.db'
-JWT_SECRET = os.environ.get("JWT_SECRET")
+JWT_SECRET = st.secrets["JWT_SECRET"]
 JWT_EXP_MINUTES = 120
 
 REGULAMENTO = """
@@ -73,13 +73,13 @@ Cada participante deve indicar o campeão e o vice do campeonato de pilotos e a 
 A pontuação será 150 pontos se acertar o campeão, 100 se acertar o vice, 80 acertando equipe – Que serão somados à pontuação ao final do campeonato.
 
 Cada participante possui 15 (quinze) fichas para serem apostadas a cada corrida da seguinte maneira:  
-- A aposta deve conter no mínimo 3 pilotos de equipes diferentes (Apostou no Hamilton, não pode apostar no Leclerc por ex.)  
-- Sem limite de ficha por piloto, vale 13 / 1 / 1, desde que respeitada a regra acima.  
-- As corridas Sprint seguem a mesma regra, sendo consideradas provas válidas para a pontuação.  
+A aposta deve conter no mínimo 3 pilotos de equipes diferentes (Apostou no Hamilton, não pode apostar no Leclerc por ex.)  
+Sem limite de ficha por piloto, vale 13 / 1 / 1, desde que respeitada a regra acima.  
+As corridas Sprint seguem a mesma regra, sendo consideradas provas válidas para a pontuação.  
 Deve ser indicado o piloto que irá chegar em 11º lugar em todas as provas e em caso de acerto será computado 25 pontos.
 
 A pontuação do participante será a multiplicação das fichas apostadas em cada piloto pelo número de pontos que ele obteve na prova (fichas x pontos) + pontuação do 11º lugar.  
-As apostas serão registradas neste sistema, sendo que o placar atualizado será atualizado na página específica após a atualização dos resultados das corridas.
+As apostas serão lançadas na planilha de controle que está hospedada no OneDrive, sendo que o placar atualizado será publicado na página do grupo e no WhatsApp após as corridas.
 
 Critérios de Desempate
 
@@ -98,9 +98,6 @@ A premiação será realizada em um Happy-Hour a ser agendado entre os participa
 """
 
 # --- BANCO E FUNÇÕES DE DADOS ---
-def db_connect():
-    return sqlite3.connect(DB_PATH, check_same_thread=False)
-
 def init_db():
     conn = db_connect()
     c = conn.cursor()
@@ -112,9 +109,9 @@ senha_hash TEXT,
 perfil TEXT,
 status TEXT DEFAULT 'Ativo',
 faltas INTEGER DEFAULT 0)''')
-    usuario_master = os.environ.get("usuario_master")
-    email_master = os.environ.get("email_master")
-    senha_master = os.environ.get("senha_master")
+    usuario_master = st.secrets["usuario_master"]
+    email_master = st.secrets["email_master"]
+    senha_master = st.secrets["senha_master"]
     senha_hash = bcrypt.hashpw(senha_master.encode(), bcrypt.gensalt()).decode('utf-8')
     c.execute('''INSERT OR IGNORE INTO usuarios (nome, email, senha_hash, perfil, status, faltas)
 VALUES (?, ?, ?, ?, ?, ?)''',
@@ -421,14 +418,14 @@ if st.session_state['pagina'] == "Login":
             if st.button("Criar usuário"):
                 st.session_state['criar_usuario'] = True
         st.markdown(
-                    """
-                    <a href="https://www.digitalocean.com/?refcode=7a57329868da&utm_campaign=Referral_Invite&utm_medium=Referral_Program&utm_source=badge" target="_blank">
-                        <img src="https://web-platforms.sfo2.cdn.digitaloceanspaces.com/WWW/Badge%201.svg" alt="DigitalOcean Referral Badge" style="width:160px;" />
-                    </a>
-                    """,
-                    unsafe_allow_html=True
-                )
-    
+            """
+            <a href="https://www.digitalocean.com/?refcode=7a57329868da&utm_campaign=Referral_Invite&utm_medium=Referral_Program&utm_source=badge" target="_blank">
+                <img src="https://web-platforms.sfo2.cdn.digitaloceanspaces.com/WWW/Badge%201.svg" alt="DigitalOcean Referral Badge" style="width:160px;" />
+            </a>
+            """,
+            unsafe_allow_html=True
+        )
+            
     elif st.session_state['esqueceu_senha']:
         st.subheader("Redefinir senha")
         email_reset = st.text_input("Email cadastrado")
@@ -530,7 +527,7 @@ if st.session_state['pagina'] == "Painel do Participante" and st.session_state['
                     with col2:
                         if piloto_sel != "Nenhum":
                             valor_ficha = st.number_input(
-                                f"Fichas para {piloto_sel}", min_value=0, max_value=13,
+                                f"Fichas para {piloto_sel}", min_value=0, max_value=15,
                                 value=fichas_ant[i] if len(fichas_ant) > i else 0,
                                 key=f"fichas_aposta_{i}"
                             )
@@ -731,9 +728,6 @@ if st.session_state['pagina'] == "Cadastro de novo participante" and st.session_
                 st.error("Email já cadastrado.")
     else:
         st.warning("Acesso restrito ao usuário master.")
-
-import pandas as pd
-from datetime import datetime
 
 # --- GESTÃO DO CAMPEONATO (Pilotos e Provas) ---
 if st.session_state['pagina'] == "Gestão do campeonato" and st.session_state['token']:
@@ -1175,13 +1169,8 @@ if st.session_state['pagina'] == "Regulamento":
     st.markdown(REGULAMENTO.replace('\n', '  \n'))
 
 # --- Backup ---
-import streamlit as st
-import sqlite3
-import pandas as pd
 import io
-import os
-
-DB_PATH = 'bolao_f1Prod.db'  # Ajuste para o caminho do banco
+DB_PATH = 'bolao_f1Dev.db'  # Ajuste para o caminho do seu banco
 
 def exportar_tabelas_para_excel(db_path):
     conn = sqlite3.connect(db_path)
