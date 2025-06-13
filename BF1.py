@@ -12,7 +12,7 @@ from db_utils import db_connect
 from championship_bets import main as championship_bets_main
 from championship_results import main as championship_results_main
 
-JWT_SECRET = os.environ.get["JWT_SECRET"]
+JWT_SECRET = os.environ.get("JWT_SECRET")
 JWT_EXP_MINUTES = 120
 
 REGULAMENTO = """
