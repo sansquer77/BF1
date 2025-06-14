@@ -15,7 +15,7 @@ from analysis import main as analysis_main
 
 st.set_page_config(
     page_title="BF1",
-    page_icon="logo.png",  # ou "favicon.ico"
+    page_icon="Logo.png",  # ou "favicon.ico"
     layout="wide"  # ou "centered"
 )
 
