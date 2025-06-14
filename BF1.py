@@ -13,6 +13,12 @@ from championship_bets import main as championship_bets_main
 from championship_results import main as championship_results_main
 from analysis import main as analysis_main
 
+st.set_page_config(
+    page_title="BF1",
+    page_icon="logo.png",  # ou "favicon.ico"
+    layout="wide"  # ou "centered"
+)
+
 JWT_SECRET = os.environ.get("JWT_SECRET")
 JWT_EXP_MINUTES = 120
 
@@ -336,7 +342,6 @@ def gerar_aposta_automatica(usuario_id, prova_id, nome_prova, apostas_df, provas
     return True, "Aposta automática gerada!"
 
 # --- INICIALIZAÇÃO E MENU ---
-st.set_page_config(page_title="Bolão F1 2025", layout="wide")
 init_db()
 
 if 'pagina' not in st.session_state:
