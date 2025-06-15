@@ -214,7 +214,7 @@ def generate_token(user_id, perfil, status):
         'user_id': user_id,
         'perfil': perfil,
         'status': status,
-        'exp': datetime.now(UTC) + timedelta(minutes=JWT_EXP_MINUTES)
+        'exp': datetime.now(ZoneInfo("UTC")) + timedelta(minutes=JWT_EXP_MINUTES)
     }
     token = pyjwt.encode(payload, JWT_SECRET, algorithm="HS256")
     if isinstance(token, bytes):
