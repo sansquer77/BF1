@@ -1130,46 +1130,54 @@ if st.session_state['pagina'] == "Classificação" and st.session_state['token']
     st.subheader("Classificação Final (Provas + Campeonato)")
     st.table(df_class_completo)
 
-    #--------- 3. Pontuação por Prova (detalhe) ----------
+    # --------- 3. Pontuação por Prova (detalhe) ----------
     st.subheader("Pontuação por Prova")
     
-    # 1. Garantir que as provas estão ordenadas por prova_id
+    # 1. Ordenar provas pelo ID correto (coluna 'id' na tabela provas)
     provas_df = provas_df.sort_values('id')
     provas_nomes = provas_df['nome'].tolist()
-    provas_ids_ordenados = provas_df['id'].tolist()
+    provas_ids_ordenados = provas_df['id'].tolist()  # Usar 'id' em vez de 'prova_id'
     
-    # 2. Reestruturar os dados para mapear pontos por prova_id
+    # 2. Mapear pontos por prova_id (usando o id da prova)
     dados_cruzados = {prova_nome: {} for prova_nome in provas_nomes}
     
     for part in tabela_detalhada:
         participante = part['Participante']
-        # Criar dicionário de {prova_id: pontos} para o participante
         pontos_por_prova = {}
-        apostas_part = apostas_df[apostas_df['usuario_id'] == participantes[participantes['nome'] == participante].iloc[0]['id']]
+        
+        # Obter ID do participante
+        usuario_id = participantes[participantes['nome'] == participante].iloc[0]['id']
+        
+        # Filtrar apostas do participante
+        apostas_part = apostas_df[apostas_df['usuario_id'] == usuario_id]
+        
         for _, aposta in apostas_part.iterrows():
             pontos = calcular_pontuacao_lote(pd.DataFrame([aposta]), resultados_df, provas_df)
             if pontos:
+                # Usar prova_id da aposta (foreign key para provas.id)
                 pontos_por_prova[aposta['prova_id']] = pontos[0]
         
-        # Preencher os pontos para cada prova_id, mesmo que não haja aposta
+        # Preencher pontos para todas as provas
         for prova_id, prova_nome in zip(provas_ids_ordenados, provas_nomes):
             pontos = pontos_por_prova.get(prova_id, 0)
             dados_cruzados[prova_nome][participante] = pontos if pontos is not None else 0
     
-    # 3. Criar DataFrame cruzado corretamente alinhado
+    # 3. Criar DataFrame cruzado
     df_cruzada = pd.DataFrame(dados_cruzados).T
     df_cruzada = df_cruzada.reindex(columns=[p['nome'] for _, p in participantes.iterrows()], fill_value=0)
     
     st.dataframe(df_cruzada)
 
-    # --------- 4. Gráfico de evolução ----------
+   # --------- 4. Gráfico de evolução ----------
     st.subheader("Evolução da Pontuação Acumulada")
+    
     if not df_cruzada.empty:
         fig = go.Figure()
-        for participante in participantes_nomes:
+        # Usar nomes das colunas diretamente do DataFrame
+        for participante in df_cruzada.columns:
             pontos_acumulados = df_cruzada[participante].cumsum()
             fig.add_trace(go.Scatter(
-                x=provas_nomes,
+                x=df_cruzada.index.tolist(),  # Nomes das provas como eixo X
                 y=pontos_acumulados,
                 mode='lines+markers',
                 name=participante
@@ -1179,11 +1187,8 @@ if st.session_state['pagina'] == "Classificação" and st.session_state['token']
             xaxis_title="Prova",
             yaxis_title="Pontuação Acumulada",
             xaxis_tickangle=-45,
-            xaxis=dict(tickfont=dict(size=11)),
-            yaxis=dict(tickfont=dict(size=11)),
             margin=dict(l=40, r=20, t=60, b=80),
-            plot_bgcolor='rgba(240,240,255,0.9)',
-            hovermode='x unified'
+            plot_bgcolor='rgba(240,240,255,0.9)'
         )
         st.plotly_chart(fig, use_container_width=True)
     else:
