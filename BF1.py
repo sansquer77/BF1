@@ -1130,7 +1130,7 @@ if st.session_state['pagina'] == "Classificação" and st.session_state['token']
     st.subheader("Classificação Final (Provas + Campeonato)")
     st.table(df_class_completo)
 
-     --------- 3. Pontuação por Prova (detalhe) ----------
+    #--------- 3. Pontuação por Prova (detalhe) ----------
     st.subheader("Pontuação por Prova")
     
     # 1. Garantir que as provas estão ordenadas por prova_id
