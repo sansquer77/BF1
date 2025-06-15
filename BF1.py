@@ -266,49 +266,72 @@ def salvar_aposta(usuario_id, prova_id, pilotos, fichas, piloto_11, nome_prova, 
     conn = db_connect()
     c = conn.cursor()
     data_envio = datetime.now(ZoneInfo("America/Sao_Paulo")).isoformat()
-    c.execute('DELETE FROM apostas WHERE usuario_id=? AND prova_id=?', (usuario_id, prova_id))
-    c.execute('INSERT INTO apostas (usuario_id, prova_id, data_envio, pilotos, fichas, piloto_11, nome_prova, automatica) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-              (usuario_id, prova_id, data_envio, ','.join(pilotos), ','.join(map(str, fichas)), piloto_11, nome_prova, automatica))
-    conn.commit()
     
-    # ---- NOVO: Disparar e-mails após salvar ----
-    # Obter dados do usuário
-    usuario = get_user_by_id(usuario_id)
-    email_usuario = usuario[2]  # Supondo que o email está no índice 2
+    try:
+        # Salvar aposta no banco
+        c.execute('DELETE FROM apostas WHERE usuario_id=? AND prova_id=?', (usuario_id, prova_id))
+        c.execute('''INSERT INTO apostas 
+                    (usuario_id, prova_id, data_envio, pilotos, fichas, piloto_11, nome_prova, automatica) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                (usuario_id, prova_id, data_envio, ','.join(pilotos), ','.join(map(str, fichas)), 
+                piloto_11, nome_prova, automatica))
+        conn.commit()
+
+        # ---- Disparar e-mails ----
+        usuario = get_user_by_id(usuario_id)
+        if not usuario:
+            raise ValueError("Usuário não encontrado")
+
+        email_usuario = usuario[2]
+        EMAIL_REMETENTE = "sansquer@gmail.com"  # Substitua por variável de ambiente
+        SENHA_REMETENTE = os.environ.get("SENHA_EMAIL")  # Garanta que está configurada
+        EMAIL_ADMIN = "cristiano_gaspar@outlook.com"
+
+        corpo_html = f"""
+        <h3>✅ Aposta registrada!</h3>
+        <p><strong>Prova:</strong> {nome_prova}</p>
+        <p><strong>Pilotos:</strong> {', '.join(pilotos)}</p>
+        <p><strong>Fichas:</strong> {', '.join(map(str, fichas))}</p>
+        <p><strong>11º Colocado:</strong> {piloto_11}</p>
+        <p>Data/Hora: {data_envio}</p>
+        """
+
+        # Função de envio corrigida
+        def enviar_email(destinatario, assunto, corpo_html):
+            from email.mime.text import MIMEText
+            from email.mime.multipart import MIMEMultipart
+            import smtplib
+
+            msg = MIMEMultipart()
+            msg['From'] = EMAIL_REMETENTE
+            msg['To'] = destinatario
+            msg['Subject'] = assunto
+            msg.attach(MIMEText(corpo_html, 'html'))
+
+            try:
+                with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+                    server.login(EMAIL_REMETENTE, SENHA_REMETENTE)
+                    server.sendmail(EMAIL_REMETENTE, destinatario, msg.as_string())
+                return True
+            except Exception as e:
+                st.error(f"Erro no envio: {str(e)}")
+                return False
+
+        # Enviar e-mails com tratamento de erro
+        if not enviar_email(email_usuario, "Confirmação de Aposta - BF1Dev", corpo_html):
+            st.error("Falha no envio para o participante")
+
+        if not enviar_email(EMAIL_ADMIN, f"Nova aposta de {usuario[1]}", corpo_html):
+            st.error("Falha no envio para admin")
+
+    except Exception as e:
+        st.error(f"Erro geral ao salvar aposta: {str(e)}")
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
     
-    # Configurações de e-mail (use secrets para produção!)
-    EMAIL_REMETENTE = "sansquer@gmail.com"  # Ou use st.secrets["EMAIL_REMETENTE"]
-    SENHA_REMETENTE = os.environ.get("SENHA_EMAIL")  # Armazene em secrets na produção!
-    EMAIL_ADMIN = "cristiano_gaspar@outlook.com"
-    
-    # Corpo do e-mail em HTML
-    corpo_html = f"""
-    <h3>Sua aposta foi registrada com sucesso!</h3>
-    <p><strong>Prova:</strong> {nome_prova}</p>
-    <p><strong>Pilotos:</strong> {', '.join(pilotos)}</p>
-    <p><strong>Fichas:</strong> {', '.join(map(str, fichas))}</p>
-    <p><strong>11º Colocado:</strong> {piloto_11}</p>
-    <p>Data/Hora: {data_envio}</p>
-    """
-    
-    # Enviar para o participante
-    enviar_email(
-        email_usuario,
-        "Confirmação de Aposta - BF1Dev",
-        corpo_html,
-        EMAIL_REMETENTE,
-        SENHA_REMETENTE
-    )
-    
-    # Enviar cópia para o admin
-    enviar_email(
-        EMAIL_ADMIN,
-        f"Nova aposta registrada por {usuario[1]}",
-        corpo_html,
-        EMAIL_REMETENTE,
-        SENHA_REMETENTE
-    )
-    conn.close()
+    return True
 
 def registrar_log_aposta(apostador, aposta, nome_prova):
     conn = db_connect()
@@ -1107,18 +1130,36 @@ if st.session_state['pagina'] == "Classificação" and st.session_state['token']
     st.subheader("Classificação Final (Provas + Campeonato)")
     st.table(df_class_completo)
 
-    # --------- 3. Pontuação por Prova (detalhe) ----------
+     --------- 3. Pontuação por Prova (detalhe) ----------
     st.subheader("Pontuação por Prova")
+    
+    # 1. Garantir que as provas estão ordenadas por prova_id
+    provas_df = provas_df.sort_values('prova_id')
     provas_nomes = provas_df['nome'].tolist()
-    participantes_nomes = [p['Participante'] for p in tabela_detalhada]
-    dados_cruzados = {}
-    for idx, prova in enumerate(provas_nomes):
-        linha = {}
-        for part in tabela_detalhada:
-            linha[part['Participante']] = part['Pontos por Prova'][idx] if idx < len(part['Pontos por Prova']) and part['Pontos por Prova'][idx] is not None else 0
-        dados_cruzados[prova] = linha
+    provas_ids_ordenados = provas_df['prova_id'].tolist()
+    
+    # 2. Reestruturar os dados para mapear pontos por prova_id
+    dados_cruzados = {prova_nome: {} for prova_nome in provas_nomes}
+    
+    for part in tabela_detalhada:
+        participante = part['Participante']
+        # Criar dicionário de {prova_id: pontos} para o participante
+        pontos_por_prova = {}
+        apostas_part = apostas_df[apostas_df['usuario_id'] == participantes[participantes['nome'] == participante].iloc[0]['id']]
+        for _, aposta in apostas_part.iterrows():
+            pontos = calcular_pontuacao_lote(pd.DataFrame([aposta]), resultados_df, provas_df)
+            if pontos:
+                pontos_por_prova[aposta['prova_id']] = pontos[0]
+        
+        # Preencher os pontos para cada prova_id, mesmo que não haja aposta
+        for prova_id, prova_nome in zip(provas_ids_ordenados, provas_nomes):
+            pontos = pontos_por_prova.get(prova_id, 0)
+            dados_cruzados[prova_nome][participante] = pontos if pontos is not None else 0
+    
+    # 3. Criar DataFrame cruzado corretamente alinhado
     df_cruzada = pd.DataFrame(dados_cruzados).T
-    df_cruzada = df_cruzada.reindex(columns=participantes_nomes, fill_value=0)
+    df_cruzada = df_cruzada.reindex(columns=[p['nome'] for _, p in participantes.iterrows()], fill_value=0)
+    
     st.dataframe(df_cruzada)
 
     # --------- 4. Gráfico de evolução ----------
