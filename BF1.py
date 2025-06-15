@@ -262,7 +262,7 @@ def autenticar_usuario(email, senha):
         return user
     return None
 
-ef salvar_aposta(usuario_id, prova_id, pilotos, fichas, piloto_11, nome_prova, automatica=0):
+def salvar_aposta(usuario_id, prova_id, pilotos, fichas, piloto_11, nome_prova, automatica=0):
     conn = db_connect()
     c = conn.cursor()
     data_envio = datetime.now(ZoneInfo("America/Sao_Paulo")).isoformat()
