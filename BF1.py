@@ -3,7 +3,8 @@ import sqlite3
 import bcrypt
 import jwt as pyjwt
 import pandas as pd
-from datetime import datetime, timedelta, UTC
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import ast
 import os
 import matplotlib.pyplot as plt
@@ -12,6 +13,9 @@ from db_utils import db_connect
 from championship_bets import main as championship_bets_main
 from championship_results import main as championship_results_main
 from analysis import main as analysis_main
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 st.set_page_config(
     page_title="BF1",
@@ -21,6 +25,7 @@ st.set_page_config(
 
 JWT_SECRET = os.environ.get("JWT_SECRET")
 JWT_EXP_MINUTES = 120
+data_envio = datetime.now(ZoneInfo("America/Sao_Paulo")).isoformat()
 
 REGULAMENTO = """
 REGULAMENTO BF1-2025
@@ -257,20 +262,58 @@ def autenticar_usuario(email, senha):
         return user
     return None
 
-def salvar_aposta(usuario_id, prova_id, pilotos, fichas, piloto_11, nome_prova, automatica=0):
+ef salvar_aposta(usuario_id, prova_id, pilotos, fichas, piloto_11, nome_prova, automatica=0):
     conn = db_connect()
     c = conn.cursor()
-    data_envio = datetime.now().isoformat()
+    data_envio = datetime.now(ZoneInfo("America/Sao_Paulo")).isoformat()
     c.execute('DELETE FROM apostas WHERE usuario_id=? AND prova_id=?', (usuario_id, prova_id))
     c.execute('INSERT INTO apostas (usuario_id, prova_id, data_envio, pilotos, fichas, piloto_11, nome_prova, automatica) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
               (usuario_id, prova_id, data_envio, ','.join(pilotos), ','.join(map(str, fichas)), piloto_11, nome_prova, automatica))
     conn.commit()
+    
+    # ---- NOVO: Disparar e-mails após salvar ----
+    # Obter dados do usuário
+    usuario = get_user_by_id(usuario_id)
+    email_usuario = usuario[2]  # Supondo que o email está no índice 2
+    
+    # Configurações de e-mail (use secrets para produção!)
+    EMAIL_REMETENTE = "sansquer@gmail.com"  # Ou use st.secrets["EMAIL_REMETENTE"]
+    SENHA_REMETENTE = os.environ.get("SENHA_EMAIL")  # Armazene em secrets na produção!
+    EMAIL_ADMIN = "cristiano_gaspar@outlook.com"
+    
+    # Corpo do e-mail em HTML
+    corpo_html = f"""
+    <h3>Sua aposta foi registrada com sucesso!</h3>
+    <p><strong>Prova:</strong> {nome_prova}</p>
+    <p><strong>Pilotos:</strong> {', '.join(pilotos)}</p>
+    <p><strong>Fichas:</strong> {', '.join(map(str, fichas))}</p>
+    <p><strong>11º Colocado:</strong> {piloto_11}</p>
+    <p>Data/Hora: {data_envio}</p>
+    """
+    
+    # Enviar para o participante
+    enviar_email(
+        email_usuario,
+        "Confirmação de Aposta - BF1Dev",
+        corpo_html,
+        EMAIL_REMETENTE,
+        SENHA_REMETENTE
+    )
+    
+    # Enviar cópia para o admin
+    enviar_email(
+        EMAIL_ADMIN,
+        f"Nova aposta registrada por {usuario[1]}",
+        corpo_html,
+        EMAIL_REMETENTE,
+        SENHA_REMETENTE
+    )
     conn.close()
 
 def registrar_log_aposta(apostador, aposta, nome_prova):
     conn = db_connect()
     c = conn.cursor()
-    agora = datetime.now()
+    agora = datetime.now(ZoneInfo("America/Sao_Paulo")).isoformat()
     data = agora.strftime('%Y-%m-%d')
     horario = agora.strftime('%H:%M:%S')
     c.execute('INSERT INTO log_apostas (apostador, data, horario, aposta, nome_prova) VALUES (?, ?, ?, ?, ?)',
@@ -404,7 +447,6 @@ def get_payload():
         st.stop()
     return payload
 
-# --- Login, Esqueceu a Senha e Criar Usuário Inativo ---
 # --- Login, Esqueceu a Senha e Criar Usuário Inativo ---
 if st.session_state['pagina'] == "Login":
     st.title("Login")
