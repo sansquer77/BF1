@@ -1134,9 +1134,9 @@ if st.session_state['pagina'] == "Classificação" and st.session_state['token']
     st.subheader("Pontuação por Prova")
     
     # 1. Garantir que as provas estão ordenadas por prova_id
-    provas_df = provas_df.sort_values('prova_id')
+    provas_df = provas_df.sort_values('id')
     provas_nomes = provas_df['nome'].tolist()
-    provas_ids_ordenados = provas_df['prova_id'].tolist()
+    provas_ids_ordenados = provas_df['id'].tolist()
     
     # 2. Reestruturar os dados para mapear pontos por prova_id
     dados_cruzados = {prova_nome: {} for prova_nome in provas_nomes}
