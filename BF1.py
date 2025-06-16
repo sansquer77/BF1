@@ -19,8 +19,8 @@ from email.mime.text import MIMEText
 
 st.set_page_config(
     page_title="BF1",
-    page_icon="Logo.png",  # ou "favicon.ico"
-    layout="wide"  # ou "centered"
+    page_icon="Logo.png",
+    layout="wide"
 )
 
 JWT_SECRET = os.environ.get("JWT_SECRET")
