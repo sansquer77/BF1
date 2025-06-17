@@ -4,27 +4,25 @@ from fastf1.ergast import Ergast
 def get_current_season():
     ergast = Ergast()
     schedule = ergast.get_race_schedule('current')
-    # schedule já é um DataFrame
     if not schedule.empty and 'season' in schedule.columns:
         return schedule['season'].iloc[0]
     else:
         return "Temporada não encontrada"
 
 def get_current_driver_standings():
-    from fastf1.ergast import Ergast
     ergast = Ergast()
     standings = ergast.get_driver_standings('current')
     if len(standings.content) > 0:
         df = standings.content[-1]
         df['driverName'] = df['givenName'] + ' ' + df['familyName']
-        # 'constructorNames' pode ser uma lista, junte em string
         if 'constructorNames' in df.columns:
             df['constructorNames'] = df['constructorNames'].apply(lambda x: ', '.join(x) if isinstance(x, list) else x)
-        # Monta lista de colunas conforme disponíveis
-        cols = ['position', 'driverName', 'points', 'wins', 'constructorNames']
-        if 'nationality' in df.columns:
-            cols.insert(2, 'nationality')
-        return df[cols]
+        # Garante todas as colunas esperadas
+        expected_cols = ['position', 'driverName', 'nationality', 'points', 'wins', 'constructorNames']
+        for col in expected_cols:
+            if col not in df.columns:
+                df[col] = None
+        return df[expected_cols]
     else:
         return pd.DataFrame([{'Info': 'Sem dados de classificação de pilotos.'}])
 
@@ -33,15 +31,19 @@ def get_current_constructor_standings():
     standings = ergast.get_constructor_standings('current')
     if len(standings.content) > 0:
         df = standings.content[-1]
-        return df[['position', 'name', 'nationality', 'points', 'wins']]
+        expected_cols = ['position', 'name', 'nationality', 'points', 'wins']
+        for col in expected_cols:
+            if col not in df.columns:
+                df[col] = None
+        return df[expected_cols]
     else:
         return pd.DataFrame([{'Info': 'Sem dados de classificação de construtores.'}])
 
 def get_driver_points_by_race():
     ergast = Ergast()
     results = ergast.get_race_results('current')
-    desc = results.description  # DataFrame de rounds/corridas
-    content = results.content   # lista de DFs, um por corrida
+    desc = results.description
+    content = results.content
 
     if not content or desc.empty:
         return pd.DataFrame([{'Info': 'Sem dados de resultados de corridas.'}])
@@ -68,6 +70,10 @@ def get_driver_points_by_race():
         values='cumulative_points',
         fill_value=0
     ).reset_index()
+    # Garante que sempre tenha as colunas 'Round' e 'Race'
+    for col in ['Round', 'Race']:
+        if col not in pivot.columns:
+            pivot[col] = None
     return pivot
 
 def get_qualifying_vs_race_delta():
@@ -88,10 +94,18 @@ def get_qualifying_vs_race_delta():
     df_race['driverName'] = df_race['givenName'] + ' ' + df_race['familyName']
 
     merged = pd.merge(df_race, qualy, on='driverName', suffixes=('_race', '_qualy'))
+    # Garante as colunas esperadas
+    for col in ['positionOrder_qualy', 'positionOrder_race']:
+        if col not in merged.columns:
+            merged[col] = None
     merged['QualyPos'] = merged['positionOrder_qualy']
     merged['RacePos'] = merged['positionOrder_race']
     merged['Delta'] = merged['QualyPos'] - merged['RacePos']
-    return merged[['driverName', 'QualyPos', 'RacePos', 'Delta']].sort_values('RacePos')
+    expected_cols = ['driverName', 'QualyPos', 'RacePos', 'Delta']
+    for col in expected_cols:
+        if col not in merged.columns:
+            merged[col] = None
+    return merged[expected_cols].sort_values('RacePos')
 
 def get_fastest_lap_times():
     ergast = Ergast()
@@ -107,9 +121,13 @@ def get_fastest_lap_times():
         return pd.DataFrame([{'Info': 'Sem dados de corrida para a última prova.'}])
     df_race['driverName'] = df_race['givenName'] + ' ' + df_race['familyName']
     fastest = df_race[df_race['fastestLapRank'] == 1]
+    expected_cols = ['driverName', 'fastestLapTime', 'fastestLapSpeed', 'positionOrder', 'points']
+    for col in expected_cols:
+        if col not in fastest.columns:
+            fastest[col] = None
     if fastest.empty:
         return pd.DataFrame([{'Info': 'Sem volta mais rápida registrada.'}])
-    return fastest[['driverName', 'fastestLapTime', 'fastestLapSpeed', 'positionOrder', 'points']]
+    return fastest[expected_cols]
 
 def get_pit_stop_data():
     ergast = Ergast()
@@ -122,4 +140,8 @@ def get_pit_stop_data():
     if pitstops.empty:
         return pd.DataFrame([{'Info': 'Sem dados de pit stop para a última corrida.'}])
     pitstops['driverName'] = pitstops['givenName'] + ' ' + pitstops['familyName']
-    return pitstops[['driverName', 'stop', 'lap', 'time', 'duration']]
+    expected_cols = ['driverName', 'stop', 'lap', 'time', 'duration']
+    for col in expected_cols:
+        if col not in pitstops.columns:
+            pitstops[col] = None
+    return pitstops[expected_cols]
