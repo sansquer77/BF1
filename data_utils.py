@@ -41,7 +41,7 @@ def get_current_constructor_standings():
 
 def get_driver_points_by_race():
     ergast = Ergast()
-    results = ergast.get_race_results('current')
+    results = ergast.get_race_results('2025')
     desc = results.description
     content = results.content
 
@@ -87,14 +87,13 @@ def get_qualifying_vs_race_delta():
     idx_last = desc[desc['round'] == last_round].index[0]
     df_race = content[idx_last]
 
-    qualy = ergast.get_qualifying('current', round=last_round)
+    qualy = ergast.get_qualifying_results('current', round=last_round)
     if qualy.empty or df_race.empty:
         return pd.DataFrame([{'Info': 'Sem dados de qualifying ou corrida para a última prova.'}])
     qualy['driverName'] = qualy['givenName'] + ' ' + qualy['familyName']
     df_race['driverName'] = df_race['givenName'] + ' ' + df_race['familyName']
 
     merged = pd.merge(df_race, qualy, on='driverName', suffixes=('_race', '_qualy'))
-    # Garante as colunas esperadas
     for col in ['positionOrder_qualy', 'positionOrder_race']:
         if col not in merged.columns:
             merged[col] = None
