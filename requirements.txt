@@ -6,4 +6,4 @@ pyjwt
 openpyxl
 plotly
 seaborn
-fastf1
+fastf1>=3.3.6
