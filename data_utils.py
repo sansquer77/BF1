@@ -14,6 +14,8 @@ def get_current_driver_standings():
     ergast = Ergast()
     standings = ergast.get_driver_standings('current')
     df = standings.as_dataframe()
+    if df.empty:
+        return pd.DataFrame([{'Info': 'Sem dados de classificação de pilotos.'}])
     df['driverName'] = df['givenName'] + ' ' + df['familyName']
     return df[['position', 'driverName', 'nationality', 'points', 'wins', 'constructors']]
 
@@ -21,6 +23,8 @@ def get_current_constructor_standings():
     ergast = Ergast()
     standings = ergast.get_constructor_standings('current')
     df = standings.as_dataframe()
+    if df.empty:
+        return pd.DataFrame([{'Info': 'Sem dados de classificação de construtores.'}])
     return df[['position', 'name', 'nationality', 'points', 'wins']]
 
 def get_driver_points_by_race():
@@ -28,6 +32,8 @@ def get_driver_points_by_race():
     results = ergast.get_race_results('current')
     desc = results.description.as_dataframe()
     content = results.as_dataframe()
+    if content.empty or desc.empty:
+        return pd.DataFrame([{'Info': 'Sem dados de resultados de corridas.'}])
 
     df = content.merge(
         desc[['round', 'raceName']],
@@ -50,6 +56,8 @@ def get_qualifying_vs_race_delta():
     results = ergast.get_race_results('current')
     desc = results.description.as_dataframe()
     content = results.as_dataframe()
+    if desc.empty or content.empty:
+        return pd.DataFrame([{'Info': 'Sem dados de corrida para análise de delta.'}])
     last_round = desc['round'].max()
     df_race = content[content['round'] == last_round]
 
@@ -70,18 +78,24 @@ def get_fastest_lap_times():
     results = ergast.get_race_results('current')
     desc = results.description.as_dataframe()
     content = results.as_dataframe()
+    if desc.empty or content.empty:
+        return pd.DataFrame([{'Info': 'Sem dados de corrida para a última prova.'}])
     last_round = desc['round'].max()
     df_race = content[content['round'] == last_round]
     if df_race.empty:
         return pd.DataFrame([{'Info': 'Sem dados de corrida para a última prova.'}])
     df_race['driverName'] = df_race['givenName'] + ' ' + df_race['familyName']
     fastest = df_race[df_race['fastestLapRank'] == 1]
+    if fastest.empty:
+        return pd.DataFrame([{'Info': 'Sem volta mais rápida registrada.'}])
     return fastest[['driverName', 'fastestLapTime', 'fastestLapSpeed', 'positionOrder', 'points']]
 
 def get_pit_stop_data():
     ergast = Ergast()
     results = ergast.get_race_results('current')
     desc = results.description.as_dataframe()
+    if desc.empty:
+        return pd.DataFrame([{'Info': 'Sem dados de corridas para pit stops.'}])
     last_round = desc['round'].max()
     pitstops = ergast.get_pit_stops('current', round=last_round).as_dataframe()
     if pitstops.empty:
