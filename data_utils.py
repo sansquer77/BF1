@@ -2,10 +2,14 @@ import pandas as pd
 from fastf1.ergast import Ergast
 
 def get_current_season():
-    """Retorna o ano da temporada atual."""
+    from fastf1.ergast import Ergast
     ergast = Ergast()
     schedule = ergast.get_race_schedule('current')
-    return schedule.content['season'].iloc[0]
+    content = schedule.content
+    if not content.empty and 'season' in content.columns:
+        return content['season'].iloc[0]
+    else:
+        return "Temporada não encontrada"
 
 def get_current_driver_standings():
     """Retorna o DataFrame de classificação atual dos pilotos."""
