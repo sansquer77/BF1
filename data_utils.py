@@ -3,182 +3,188 @@ import pandas as pd
 
 BASE_URL = "https://api.jolpi.ca/ergast/f1"
 
+# 1. Get current F1 season
 def get_current_season():
-    url = f"{BASE_URL}/seasons"
-    resp = requests.get(url)
-    data = resp.json()
-    # Pega a última temporada (mais recente)
-    seasons = data.get('MRData', {}).get('SeasonTable', {}).get('Seasons', [])
-    if seasons:
-        return seasons[-1]['season']
-    return "Temporada não encontrada"
+    url = f"{BASE_URL}/current.json"
+    response = requests.get(url)
+    response.raise_for_status()
+    data = response.json()
+    season = data['MRData']['RaceTable']['season']
+    return season
 
-def get_current_driver_standings(season=None):
-    if season is None:
-        season = get_current_season()
-    url = f"{BASE_URL}/{season}/driverstandings"
-    resp = requests.get(url)
-    data = resp.json()
-    standings = (
-        data.get('MRData', {})
-            .get('StandingsTable', {})
-            .get('StandingsLists', [{}])[0]
-            .get('DriverStandings', [])
-    )
-    if not standings:
-        return pd.DataFrame([{'Info': 'Sem dados de classificação de pilotos.'}])
-    df = pd.json_normalize(standings)
-    df['driverName'] = df['Driver.givenName'] + ' ' + df['Driver.familyName']
-    # Garante colunas esperadas
-    expected = ['position', 'driverName', 'Driver.nationality', 'points', 'wins', 'Constructors']
-    for col in expected:
-        if col not in df.columns:
-            df[col] = None
-    # Construtores como string
-    df['constructorNames'] = df['Constructors'].apply(lambda x: ', '.join([c['name'] for c in x]) if isinstance(x, list) else '')
-    return df[['position', 'driverName', 'Driver.nationality', 'points', 'wins', 'constructorNames']]
+# 2. Get current driver standings
+def get_current_driver_standings():
+    url = f"{BASE_URL}/current/driverStandings.json"
+    response = requests.get(url)
+    response.raise_for_status()
+    data = response.json()
 
-def get_current_constructor_standings(season=None):
-    if season is None:
-        season = get_current_season()
-    url = f"{BASE_URL}/{season}/constructorstandings"
-    resp = requests.get(url)
-    data = resp.json()
-    standings = (
-        data.get('MRData', {})
-            .get('StandingsTable', {})
-            .get('StandingsLists', [{}])[0]
-            .get('ConstructorStandings', [])
-    )
-    if not standings:
-        return pd.DataFrame([{'Info': 'Sem dados de classificação de construtores.'}])
-    df = pd.json_normalize(standings)
-    expected = ['position', 'Constructor.name', 'Constructor.nationality', 'points', 'wins']
-    for col in expected:
-        if col not in df.columns:
-            df[col] = None
-    df = df.rename(columns={
-        'Constructor.name': 'name',
-        'Constructor.nationality': 'nationality'
-    })
-    return df[['position', 'name', 'nationality', 'points', 'wins']]
+    standings = data['MRData']['StandingsTable']['StandingsLists'][0]['DriverStandings']
+    
+    drivers = []
+    for s in standings:
+        driver = s['Driver']
+        constructor = s['Constructors'][0]
+        drivers.append({
+            'Position': int(s['position']),
+            'Driver': f"{driver['givenName']} {driver['familyName']}",
+            'Points': int(float(s['points'])),
+            'Wins': int(s['wins']),
+            'Nationality': driver['nationality'],
+            'Constructor': constructor['name']
+        })
+        
+    return pd.DataFrame(drivers)
 
-def get_driver_points_by_race(season=None):
-    if season is None:
-        season = get_current_season()
-    url = f"{BASE_URL}/{season}/results"
-    resp = requests.get(url)
-    data = resp.json()
-    races = data.get('MRData', {}).get('RaceTable', {}).get('Races', [])
-    if not races:
-        return pd.DataFrame([{'Info': 'Sem dados de resultados de corridas.'}])
+# 3. Get current constructor standings
+def get_current_constructor_standings():
+    url = f"{BASE_URL}/current/constructorStandings.json"
+    response = requests.get(url)
+    response.raise_for_status()
+    data = response.json()
+
+    standings = data['MRData']['StandingsTable']['StandingsLists'][0]['ConstructorStandings']
+    
+    constructors = []
+    for s in standings:
+        constructor = s['Constructor']
+        constructors.append({
+            'Position': int(s['position']),
+            'Constructor': constructor['name'],
+            'Points': int(float(s['points'])),
+            'Wins': int(s['wins']),
+            'Nationality': constructor['nationality']
+        })
+        
+    return pd.DataFrame(constructors)
+
+# 4. Get driver cumulative points by race
+def get_driver_points_by_race(season='current'):
+    limit = 30
+    offset = 0
     all_races = []
-    for race in races:
+
+    # Descobre a temporada se não for passada
+    if season == 'current':
+        url = f"{BASE_URL}/current.json"
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+        season = data['MRData']['RaceTable']['season']
+
+    while True:
+        url = f"{BASE_URL}/{season}/results.json?limit={limit}&offset={offset}"
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+        races = data['MRData']['RaceTable']['Races']
+        if not races:
+            break
+        all_races.extend(races)
+        if len(races) < limit:
+            break
+        offset += limit
+
+    points_tracker = {}
+
+    for race in all_races:
         round_num = int(race['round'])
         race_name = race['raceName']
-        for result in race.get('Results', []):
+        for result in race['Results']:
             driver_name = f"{result['Driver']['givenName']} {result['Driver']['familyName']}"
-            points = float(result['points'])
-            all_races.append({
+            points = int(float(result['points']))
+
+            if driver_name not in points_tracker:
+                points_tracker[driver_name] = []
+
+            points_tracker[driver_name].append({
                 'Round': round_num,
                 'Race': race_name,
-                'driverName': driver_name,
-                'points': points
+                'Points': points
             })
-    if not all_races:
-        return pd.DataFrame([{'Info': 'Sem dados de resultados de corridas.'}])
-    df = pd.DataFrame(all_races)
-    df = df.sort_values(['driverName', 'Round'])
-    df['cumulative_points'] = df.groupby('driverName')['points'].cumsum()
-    pivot = df.pivot_table(
-        index=['Round', 'Race'],
-        columns='driverName',
-        values='cumulative_points',
-        fill_value=0
-    ).reset_index()
-    return pivot
 
-def get_qualifying_vs_race_delta(season=None):
-    if season is None:
-        season = get_current_season()
-    # Última corrida
-    url_races = f"{BASE_URL}/{season}/races"
-    races_resp = requests.get(url_races)
-    races = races_resp.json().get('MRData', {}).get('RaceTable', {}).get('Races', [])
-    if not races:
-        return pd.DataFrame([{'Info': 'Sem dados de corridas.'}])
-    last_race = races[-1]
-    round_num = int(last_race['round'])
-    # Resultados da corrida
-    url_results = f"{BASE_URL}/{season}/{round_num}/results"
-    url_qualy = f"{BASE_URL}/{season}/{round_num}/qualifying"
-    resp_results = requests.get(url_results)
-    resp_qualy = requests.get(url_qualy)
-    race_data = resp_results.json().get('MRData', {}).get('RaceTable', {}).get('Races', [{}])[0].get('Results', [])
-    qualy_data = resp_qualy.json().get('MRData', {}).get('RaceTable', {}).get('Races', [{}])[0].get('QualifyingResults', [])
-    if not race_data or not qualy_data:
-        return pd.DataFrame([{'Info': 'Sem dados de qualifying ou corrida para a última prova.'}])
-    df_race = pd.json_normalize(race_data)
-    df_qualy = pd.json_normalize(qualy_data)
-    df_race['driverName'] = df_race['Driver.givenName'] + ' ' + df_race['Driver.familyName']
-    df_qualy['driverName'] = df_qualy['Driver.givenName'] + ' ' + df_qualy['Driver.familyName']
-    merged = pd.merge(df_race, df_qualy, on='driverName', suffixes=('_race', '_qualy'))
-    merged['QualyPos'] = merged['position_qualy'].astype(float)
-    merged['RacePos'] = merged['position_race'].astype(float)
-    merged['Delta'] = merged['QualyPos'] - merged['RacePos']
-    expected_cols = ['driverName', 'QualyPos', 'RacePos', 'Delta']
-    for col in expected_cols:
-        if col not in merged.columns:
-            merged[col] = None
-    return merged[expected_cols].sort_values('RacePos')
+    rounds = sorted(list({pt['Round'] for driver in points_tracker.values() for pt in driver}))
+    race_names = {pt['Round']: pt['Race'] for driver in points_tracker.values() for pt in driver}
 
-def get_fastest_lap_times(season=None):
-    if season is None:
-        season = get_current_season()
-    url = f"{BASE_URL}/{season}/results"
-    resp = requests.get(url)
-    data = resp.json()
-    races = data.get('MRData', {}).get('RaceTable', {}).get('Races', [])
-    if not races:
-        return pd.DataFrame([{'Info': 'Sem dados de corridas.'}])
-    last_race = races[-1]
-    results = last_race.get('Results', [])
-    if not results:
-        return pd.DataFrame([{'Info': 'Sem dados de resultados para a última corrida.'}])
-    fastest = []
-    for result in results:
-        if result.get('FastestLap', {}).get('rank') == '1':
-            driver_name = f"{result['Driver']['givenName']} {result['Driver']['familyName']}"
-            fastest.append({
-                'driverName': driver_name,
-                'fastestLapTime': result['FastestLap'].get('Time', {}).get('time'),
-                'fastestLapSpeed': result['FastestLap'].get('AverageSpeed', {}).get('speed'),
-                'positionOrder': result.get('position'),
-                'points': result.get('points')
+    data = {'Round': rounds, 'Race': [race_names[r] for r in rounds]}
+    for driver, results in points_tracker.items():
+        cumulative = 0
+        driver_points = []
+        result_dict = {r['Round']: r['Points'] for r in results}
+        for r in rounds:
+            cumulative += result_dict.get(r, 0)
+            driver_points.append(cumulative)
+        data[driver] = driver_points
+
+    return pd.DataFrame(data)
+
+# 5. Get qualifying vs race position delta for last race
+def get_qualifying_vs_race_delta():
+    last_race_url = f"{BASE_URL}/current/last.json"
+    race_resp = requests.get(last_race_url).json()
+    round_num = race_resp['MRData']['RaceTable']['round']
+
+    race_results_url = f"{BASE_URL}/current/{round_num}/results.json"
+    qual_results_url = f"{BASE_URL}/current/{round_num}/qualifying.json"
+
+    race_data = requests.get(race_results_url).json()
+    qual_data = requests.get(qual_results_url).json()
+
+    race_pos = {}
+    for res in race_data['MRData']['RaceTable']['Races'][0]['Results']:
+        name = f"{res['Driver']['givenName']} {res['Driver']['familyName']}"
+        race_pos[name] = int(res['position'])
+
+    qual_pos = {}
+    for res in qual_data['MRData']['RaceTable']['Races'][0]['QualifyingResults']:
+        name = f"{res['Driver']['givenName']} {res['Driver']['familyName']}"
+        qual_pos[name] = int(res['position'])
+
+    deltas = []
+    for driver in qual_pos:
+        if driver in race_pos:
+            deltas.append({
+                'Driver': driver,
+                'Qualifying': qual_pos[driver],
+                'Race': race_pos[driver],
+                'Delta': qual_pos[driver] - race_pos[driver]
             })
-    if not fastest:
-        return pd.DataFrame([{'Info': 'Sem volta mais rápida registrada.'}])
-    return pd.DataFrame(fastest)
 
-def get_pit_stop_data(season=None):
-    if season is None:
-        season = get_current_season()
-    url_races = f"{BASE_URL}/{season}/races"
-    races_resp = requests.get(url_races)
-    races = races_resp.json().get('MRData', {}).get('RaceTable', {}).get('Races', [])
-    if not races:
-        return pd.DataFrame([{'Info': 'Sem dados de corridas.'}])
-    last_race = races[-1]
-    round_num = int(last_race['round'])
-    url = f"{BASE_URL}/{season}/{round_num}/pitstops"
-    resp = requests.get(url)
-    pitstops = resp.json().get('MRData', {}).get('RaceTable', {}).get('Races', [{}])[0].get('PitStops', [])
-    if not pitstops:
-        return pd.DataFrame([{'Info': 'Sem dados de pit stop para a última corrida.'}])
-    df = pd.json_normalize(pitstops)
-    df['driverName'] = df['DriverId']
-    expected_cols = ['driverName', 'stop', 'lap', 'time', 'duration']
-    for col in expected_cols:
-        if col not in df.columns:
-            df[col] = None
-    return df[expected_cols]
+    return pd.DataFrame(deltas)
+
+# 6. Get fastest lap times from last race
+def get_fastest_lap_times():
+    url = f"{BASE_URL}/current/last/results.json"
+    response = requests.get(url)
+    response.raise_for_status()
+    data = response.json()
+
+    laps = []
+    for res in data['MRData']['RaceTable']['Races'][0]['Results']:
+        driver = res['Driver']
+        name = f"{driver['givenName']} {driver['familyName']}"
+        if 'FastestLap' in res:
+            time = res['FastestLap']['Time']['time']
+            laps.append({'Driver': name, 'Fastest Lap': time})
+
+    return pd.DataFrame(laps)
+
+# 7. Get pit stop data for the last race
+def get_pit_stop_data():
+    race_info = requests.get(f"{BASE_URL}/current/last.json").json()
+    round_num = race_info['MRData']['RaceTable']['round']
+
+    url = f"{BASE_URL}/current/{round_num}/pitstops.json?limit=1000"
+    response = requests.get(url)
+    response.raise_for_status()
+    data = response.json()
+
+    stops = data['MRData']['RaceTable']['Races'][0].get('PitStops', [])
+    result = [{
+        "Driver": s['driverId'].capitalize(),
+        "Lap": int(s['lap']),
+        "Stop": int(s['stop']),
+        "Time": s['duration']
+    } for s in stops]
+
+    return pd.DataFrame(result)
