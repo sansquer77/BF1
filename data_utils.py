@@ -1,6 +1,11 @@
 import pandas as pd
 from fastf1.ergast import Ergast
 
+ergast = Ergast()
+schedule = ergast.get_race_schedule('current')
+st.write(dir(schedule))
+st.write("FastF1 version:", fastf1.__version__)
+
 def get_current_season():
     ergast = Ergast()
     schedule = ergast.get_race_schedule('current')
