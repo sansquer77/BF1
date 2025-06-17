@@ -4,33 +4,30 @@ from fastf1.ergast import Ergast
 def get_current_season():
     ergast = Ergast()
     schedule = ergast.get_race_schedule('current')
-    content = schedule.data
-    if not content.empty and 'season' in content.columns:
-        return content['season'].iloc[0]
+    df = schedule.as_dataframe()
+    if not df.empty and 'season' in df.columns:
+        return df['season'].iloc[0]
     else:
         return "Temporada não encontrada"
 
 def get_current_driver_standings():
-    """Retorna o DataFrame de classificação atual dos pilotos."""
     ergast = Ergast()
     standings = ergast.get_driver_standings('current')
-    df = standings.data
+    df = standings.as_dataframe()
     df['driverName'] = df['givenName'] + ' ' + df['familyName']
     return df[['position', 'driverName', 'nationality', 'points', 'wins', 'constructors']]
 
 def get_current_constructor_standings():
-    """Retorna o DataFrame de classificação atual dos construtores."""
     ergast = Ergast()
     standings = ergast.get_constructor_standings('current')
-    df = standings.data
+    df = standings.as_dataframe()
     return df[['position', 'name', 'nationality', 'points', 'wins']]
 
 def get_driver_points_by_race():
-    """Retorna DataFrame com pontos acumulados dos pilotos por corrida."""
     ergast = Ergast()
     results = ergast.get_race_results('current')
-    desc = results.description.data
-    content = results.data
+    desc = results.description.as_dataframe()
+    content = results.as_dataframe()
 
     df = content.merge(
         desc[['round', 'raceName']],
@@ -49,15 +46,14 @@ def get_driver_points_by_race():
     return pivot
 
 def get_qualifying_vs_race_delta():
-    """Retorna DataFrame com a diferença entre posição de largada e chegada na última corrida."""
     ergast = Ergast()
     results = ergast.get_race_results('current')
-    desc = results.description.data
-    content = results.data
+    desc = results.description.as_dataframe()
+    content = results.as_dataframe()
     last_round = desc['round'].max()
     df_race = content[content['round'] == last_round]
 
-    qualy = ergast.get_qualifying('current', round=last_round).data
+    qualy = ergast.get_qualifying('current', round=last_round).as_dataframe()
     if qualy.empty or df_race.empty:
         return pd.DataFrame([{'Info': 'Sem dados de qualifying ou corrida para a última prova.'}])
     qualy['driverName'] = qualy['givenName'] + ' ' + qualy['familyName']
@@ -70,11 +66,10 @@ def get_qualifying_vs_race_delta():
     return merged[['driverName', 'QualyPos', 'RacePos', 'Delta']].sort_values('RacePos')
 
 def get_fastest_lap_times():
-    """Retorna DataFrame com as voltas mais rápidas da última corrida."""
     ergast = Ergast()
     results = ergast.get_race_results('current')
-    desc = results.description.data
-    content = results.data
+    desc = results.description.as_dataframe()
+    content = results.as_dataframe()
     last_round = desc['round'].max()
     df_race = content[content['round'] == last_round]
     if df_race.empty:
@@ -84,12 +79,11 @@ def get_fastest_lap_times():
     return fastest[['driverName', 'fastestLapTime', 'fastestLapSpeed', 'positionOrder', 'points']]
 
 def get_pit_stop_data():
-    """Retorna DataFrame com dados de pit stop da última corrida."""
     ergast = Ergast()
     results = ergast.get_race_results('current')
-    desc = results.description.data
+    desc = results.description.as_dataframe()
     last_round = desc['round'].max()
-    pitstops = ergast.get_pit_stops('current', round=last_round).data
+    pitstops = ergast.get_pit_stops('current', round=last_round).as_dataframe()
     if pitstops.empty:
         return pd.DataFrame([{'Info': 'Sem dados de pit stop para a última corrida.'}])
     pitstops['driverName'] = pitstops['givenName'] + ' ' + pitstops['familyName']
