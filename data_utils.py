@@ -11,17 +11,20 @@ def get_current_season():
         return "Temporada não encontrada"
 
 def get_current_driver_standings():
+    from fastf1.ergast import Ergast
     ergast = Ergast()
     standings = ergast.get_driver_standings('current')
-    # standings é ErgastMultiResponse: standings.description (DF), standings.content (lista de DFs)
     if len(standings.content) > 0:
-        # Última rodada (sempre a última posição da lista)
         df = standings.content[-1]
         df['driverName'] = df['givenName'] + ' ' + df['familyName']
         # 'constructorNames' pode ser uma lista, junte em string
         if 'constructorNames' in df.columns:
             df['constructorNames'] = df['constructorNames'].apply(lambda x: ', '.join(x) if isinstance(x, list) else x)
-        return df[['position', 'driverName', 'nationality', 'points', 'wins', 'constructorNames']]
+        # Monta lista de colunas conforme disponíveis
+        cols = ['position', 'driverName', 'points', 'wins', 'constructorNames']
+        if 'nationality' in df.columns:
+            cols.insert(2, 'nationality')
+        return df[cols]
     else:
         return pd.DataFrame([{'Info': 'Sem dados de classificação de pilotos.'}])
 
