@@ -592,7 +592,7 @@ if st.session_state['pagina'] == "Painel do Participante" and st.session_state['
                 fichas_ant = []
                 piloto_11_ant = ""
             st.write("Escolha seus pilotos e distribua 15 fichas entre eles (mínimo 3 pilotos de equipes diferentes):")
-            max_linhas = 5
+            max_linhas = 10
             pilotos_aposta = []
             fichas_aposta = []
             for i in range(max_linhas):
