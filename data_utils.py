@@ -64,7 +64,7 @@ def get_driver_points_by_race(season='current'):
     import pandas as pd
 
     BASE_URL = "https://api.jolpi.ca/ergast/f1"
-    limit = 720
+    limit = 2160
     offset = 0
     all_races = []
 
