@@ -60,6 +60,10 @@ def get_current_constructor_standings():
 
 # 4. Get driver cumulative points by race
 def get_driver_points_by_race(season='current'):
+    import requests
+    import pandas as pd
+
+    BASE_URL = "https://api.jolpi.ca/ergast/f1"
     limit = 30
     offset = 0
     all_races = []
@@ -81,6 +85,7 @@ def get_driver_points_by_race(season='current'):
         if not races:
             break
         all_races.extend(races)
+        # Se vier menos que o limite, não há mais páginas
         if len(races) < limit:
             break
         offset += limit
