@@ -64,7 +64,7 @@ def get_driver_points_by_race(season='current'):
     import pandas as pd
 
     BASE_URL = "https://api.jolpi.ca/ergast/f1"
-    limit = 2160
+    limit = 30
     offset = 0
     all_races = []
 
@@ -85,9 +85,6 @@ def get_driver_points_by_race(season='current'):
         if not races:
             break
         all_races.extend(races)
-        # Se vier menos que o limite, não há mais páginas
-        if len(races) < limit:
-            break
         offset += limit
 
     points_tracker = {}
@@ -122,6 +119,8 @@ def get_driver_points_by_race(season='current'):
         data[driver] = driver_points
 
     return pd.DataFrame(data)
+
+print(f"Total de provas coletadas: {len(all_races)}")
 
 # 5. Get qualifying vs race position delta for last race
 def get_qualifying_vs_race_delta():
