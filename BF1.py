@@ -1512,63 +1512,62 @@ DB_PATH = 'bolao_f1Dev.db'
 CHAMPIONSHIP_DB_PATH = 'championship.db'
 
 def exportar_apostas_campeonato_excel():
-    # Conecta apenas ao banco do campeonato (não precisa anexar outro banco)
+    """Exporta todas as apostas incluindo ID do usuário"""
     conn = sqlite3.connect(CHAMPIONSHIP_DB_PATH)
-    
-    # Nova query com campos alinhados à estrutura atual
     query = '''
     SELECT 
-        user_nome AS participante,
-        champion AS campeao,
-        vice AS vice_campeao,
-        team AS equipe_campea,
-        bet_time AS data_aposta
+        user_id AS "ID Usuário",
+        user_nome AS "Participante",
+        champion AS "Campeão",
+        vice AS "Vice",
+        team AS "Equipe",
+        bet_time AS "Data Aposta"
     FROM championship_bets
     '''
-    
     df = pd.read_sql(query, conn)
     output = io.BytesIO()
-    
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='Apostas_Campeonato')
-    
     conn.close()
     return output.getvalue()
 
 def importar_apostas_campeonato_excel(arquivo_excel_bytes):
-    conn_championship = sqlite3.connect(CHAMPIONSHIP_DB_PATH)
-    df = pd.read_excel(io.BytesIO(arquivo_excel_bytes))
+    """Importa apostas substituindo dados existentes"""
+    conn = sqlite3.connect(CHAMPIONSHIP_DB_PATH)
+    cursor = conn.cursor()
     
-    # Verificação de colunas obrigatórias
-    colunas_necessarias = ['participante', 'campeao', 'vice_campeao', 'equipe_campea']
-    if not all(col in df.columns for col in colunas_necessarias):
+    # Apaga TODOS os registros existentes
+    cursor.execute('DELETE FROM championship_bets')
+    conn.commit()
+    
+    # Lê e valida o Excel
+    df = pd.read_excel(io.BytesIO(arquivo_excel_bytes))
+    colunas_obrigatorias = ['ID Usuário', 'Participante', 'Campeão', 'Vice', 'Equipe']
+    if not all(col in df.columns for col in colunas_obrigatorias):
         raise ValueError("Arquivo Excel não possui colunas obrigatórias!")
     
-    # Processamento das linhas
+    # Processa cada linha
     for _, row in df.iterrows():
         try:
-            # Prepara valores (trata dados ausentes)
-            participante = row.get('participante', '')
-            campeao = row.get('campeao', '')
-            vice = row.get('vice_campeao', '')
-            equipe = row.get('equipe_campea', '')
-            data_aposta = row.get('data_aposta', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            user_id = row['ID Usuário']
+            participante = row['Participante']
+            campeao = row['Campeão']
+            vice = row['Vice']
+            equipe = row['Equipe']
+            data_aposta = row.get('Data Aposta', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
             
-            # Insere diretamente no banco do campeonato
-            cursor = conn_championship.cursor()
             cursor.execute('''
-                INSERT OR REPLACE INTO championship_bets 
-                (user_nome, champion, vice, team, bet_time)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (participante, campeao, vice, equipe, data_aposta))
+                INSERT INTO championship_bets 
+                (user_id, user_nome, champion, vice, team, bet_time)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (user_id, participante, campeao, vice, equipe, data_aposta))
             
         except Exception as e:
-            print(f"Erro na linha {_}: {str(e)}")
-            continue
+            print(f"Erro na linha {_+2}: {str(e)}")
     
-    conn_championship.commit()
-    conn_championship.close()
-    return "Apostas do campeonato importadas com sucesso!"
+    conn.commit()
+    conn.close()
+    return "Apostas importadas com sucesso! Dados anteriores foram substituídos."
 
 def exportar_tabelas_para_excel(db_path):
     conn = sqlite3.connect(db_path)
