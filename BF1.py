@@ -470,7 +470,10 @@ def gerar_aposta_aleatoria(pilotos_df):
     return pilotos_selecionados, fichas, piloto_11
 
 def gerar_aposta_automatica(usuario_id, prova_id, nome_prova, apostas_df, provas_df):
-    """Gera apostas automáticas com tratamento robusto de erros"""
+    """
+    Gera uma aposta automática para o usuário, copiando a aposta anterior se houver,
+    ou gerando uma aleatória. O campo 'automatica' é incrementado a cada geração.
+    """
     # Buscar informações da prova atual
     prova_atual = provas_df[provas_df['id'] == prova_id]
     if prova_atual.empty:
@@ -531,6 +534,16 @@ def gerar_aposta_automatica(usuario_id, prova_id, nome_prova, apostas_df, provas
     if aposta_existente:
         return False, "O usuário já possui aposta para esta prova."
     
+    # Buscar o maior valor atual de automatica para o usuário
+    conn = db_connect()
+    c = conn.cursor()
+    c.execute('SELECT MAX(automatica) FROM apostas WHERE usuario_id = ?', (usuario_id,))
+    max_automatica = c.fetchone()[0]
+    conn.close()
+    
+    # Determinar o novo valor de automatica
+    nova_automatica = 1 if max_automatica is None else max_automatica + 1
+
     # Forçar salvamento com horário da prova
     success = salvar_aposta(
         usuario_id, 
@@ -539,7 +552,7 @@ def gerar_aposta_automatica(usuario_id, prova_id, nome_prova, apostas_df, provas
         fichas_ant, 
         piloto_11_ant, 
         nome_prova, 
-        automatica=1,  # Marca como aposta automática
+        automatica=nova_automatica,  # Usar valor incrementado
         horario_forcado=horario_limite
     )
     
