@@ -1512,9 +1512,10 @@ DB_PATH = 'bolao_f1Dev.db'
 CHAMPIONSHIP_DB_PATH = 'championship.db'
 
 def exportar_apostas_campeonato_excel():
-    # Conecta ao banco do campeonato e anexa o banco principal
+    # Conecta apenas ao banco do campeonato (não precisa anexar outro banco)
     conn = sqlite3.connect(CHAMPIONSHIP_DB_PATH)
-    conn.execute(f"ATTACH DATABASE '{DB_PATH}' AS main_db")
+    
+    # Nova query com campos alinhados à estrutura atual
     query = '''
     SELECT 
         user_nome AS participante,
@@ -1524,12 +1525,13 @@ def exportar_apostas_campeonato_excel():
         bet_time AS data_aposta
     FROM championship_bets
     '''
-    JOIN main_db.usuarios u ON c.user_id = u.id
-    '''
+    
     df = pd.read_sql(query, conn)
     output = io.BytesIO()
+    
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='Apostas_Campeonato')
+    
     conn.close()
     return output.getvalue()
 
