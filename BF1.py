@@ -1502,7 +1502,6 @@ if st.session_state['pagina'] == "Regulamento":
     st.markdown(REGULAMENTO.replace('\n', '  \n'))
 
 # --- Backup ---
-# --- Backup ---
 import io
 import sqlite3
 import pandas as pd
@@ -1518,12 +1517,13 @@ def exportar_apostas_campeonato_excel():
     conn.execute(f"ATTACH DATABASE '{DB_PATH}' AS main_db")
     query = '''
     SELECT 
-        u.nome AS participante,
-        c.champion AS campeao,
-        c.vice AS vice_campeao,
-        c.team AS equipe_campea,
-        c.bet_time AS data_aposta
-    FROM championship_bets c
+        user_nome AS participante,
+        champion AS campeao,
+        vice AS vice_campeao,
+        team AS equipe_campea,
+        bet_time AS data_aposta
+    FROM championship_bets
+    '''
     JOIN main_db.usuarios u ON c.user_id = u.id
     '''
     df = pd.read_sql(query, conn)
@@ -1535,26 +1535,37 @@ def exportar_apostas_campeonato_excel():
 
 def importar_apostas_campeonato_excel(arquivo_excel_bytes):
     conn_championship = sqlite3.connect(CHAMPIONSHIP_DB_PATH)
-    conn_main = sqlite3.connect(DB_PATH)
     df = pd.read_excel(io.BytesIO(arquivo_excel_bytes))
+    
+    # Verificação de colunas obrigatórias
     colunas_necessarias = ['participante', 'campeao', 'vice_campeao', 'equipe_campea']
     if not all(col in df.columns for col in colunas_necessarias):
         raise ValueError("Arquivo Excel não possui colunas obrigatórias!")
+    
+    # Processamento das linhas
     for _, row in df.iterrows():
-        cursor_main = conn_main.cursor()
-        cursor_main.execute('SELECT id FROM usuarios WHERE nome = ?', (row['participante'],))
-        user_id = cursor_main.fetchone()
-        if not user_id:
-            st.warning(f"Participante '{row['participante']}' não encontrado. Aposta ignorada.")
+        try:
+            # Prepara valores (trata dados ausentes)
+            participante = row.get('participante', '')
+            campeao = row.get('campeao', '')
+            vice = row.get('vice_campeao', '')
+            equipe = row.get('equipe_campea', '')
+            data_aposta = row.get('data_aposta', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            
+            # Insere diretamente no banco do campeonato
+            cursor = conn_championship.cursor()
+            cursor.execute('''
+                INSERT OR REPLACE INTO championship_bets 
+                (user_nome, champion, vice, team, bet_time)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (participante, campeao, vice, equipe, data_aposta))
+            
+        except Exception as e:
+            print(f"Erro na linha {_}: {str(e)}")
             continue
-        cursor_championship = conn_championship.cursor()
-        cursor_championship.execute('''
-            INSERT OR REPLACE INTO championship_bets (user_id, champion, vice, team, bet_time)
-            VALUES (?, ?, ?, ?, COALESCE(?, datetime('now')))
-        ''', (user_id[0], row['campeao'], row['vice_campeao'], row['equipe_campea'], row.get('data_aposta')))
+    
     conn_championship.commit()
     conn_championship.close()
-    conn_main.close()
     return "Apostas do campeonato importadas com sucesso!"
 
 def exportar_tabelas_para_excel(db_path):
@@ -1663,7 +1674,6 @@ def modulo_exportar_importar_excel():
                     st.error(f"Erro ao importar: {e}")
     else:
         st.info("Nenhuma tabela disponível para importação.")
-
 
 # --- INTEGRAÇÃO NO APP ---
 if (
