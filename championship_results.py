@@ -1,6 +1,18 @@
 import streamlit as st
+import pandas as pd
 from championship_utils import save_final_results, get_final_results
-from championship_utils import get_apostas_df, get_usuarios_df, get_provas_df
+from db_utils import championship_db_connect  # Importe a conexão correta
+
+def get_championship_bets():
+    """Retorna DataFrame com todas as apostas do campeonato, incluindo o nome do participante."""
+    try:
+        conn = championship_db_connect()  # Use a conexão centralizada
+        df = pd.read_sql_query("SELECT * FROM championship_bets", conn)
+        conn.close()
+        return df
+    except Exception as e:
+        st.error(f"Erro ao buscar apostas do campeonato: {str(e)}")
+        return pd.DataFrame(columns=["user_id", "user_nome", "champion", "vice", "team", "bet_time"])
 
 def main():
     if st.session_state.get("user_role", "").strip().lower() != "master":
@@ -9,7 +21,6 @@ def main():
 
     st.title("🏆 Atualizar Resultado Final do Campeonato")
 
-    # Lista de pilotos e equipes atualizada
     pilotos = [
         "Pierre Gasly", "Jack Doohan", "Fernando Alonso", "Lance Stroll",
         "Charles Leclerc", "Lewis Hamilton", "Esteban Ocon", "Oliver Bearman",
@@ -18,7 +29,7 @@ def main():
         "Nico Hulkenberg", "Gabriel Bortoleto", "Alex Albon", "Carlos Sainz"
     ]
     equipes = [
-        "Red Bull", "Mercedes", "Ferrari", "McLaren", "Alpine", 
+        "Red Bull", "Mercedes", "Ferrari", "McLaren", "Alpine",
         "Aston Martin", "Haas", "Racing Bulls", "Sauber", "Williams"
     ]
 
@@ -32,7 +43,6 @@ def main():
             save_final_results(campeao, vice, equipe)
             st.success("Resultado oficial atualizado!")
 
-    # Exibe resultado atual
     resultado = get_final_results()
     st.subheader("Resultado Atual Armazenado")
     if resultado:
@@ -44,69 +54,17 @@ def main():
     else:
         st.info("Nenhum resultado registrado ainda.")
 
-    # --- TABELA COM TODAS AS APOSTAS ---
-    st.title("📊 Todas as Apostas dos Participantes")
-
-    try:
-        apostas_df = get_apostas_df()
-        usuarios_df = get_usuarios_df()
-        provas_df = get_provas_df()
-    except Exception as e:
-        st.error(f"Erro ao carregar dados: {str(e)}")
-        return
-
-    # Verifica se os DataFrames têm colunas mínimas necessárias
-    def is_valid_df(df, required_columns):
-        return not df.empty and all(col in df.columns for col in required_columns)
-
-    # Lista de colunas obrigatórias
-    apostas_required = ['usuario_id', 'prova_id', 'pilotos']
-    usuarios_required = ['id', 'nome']
-    provas_required = ['id', 'nome', 'data']
-
-    if not all([
-        is_valid_df(apostas_df, apostas_required),
-        is_valid_df(usuarios_df, usuarios_required),
-        is_valid_df(provas_df, provas_required)
-    ]):
-        st.info("Dados incompletos ou tabelas vazias.")
-        return
-
-    try:
-        # Junta informações do usuário e da prova
-        apostas_completas = apostas_df.merge(
-            usuarios_df[['id', 'nome']], 
-            left_on='usuario_id', 
-            right_on='id', 
-            suffixes=('', '_usuario')
-        ).merge(
-            provas_df[['id', 'nome', 'data']], 
-            left_on='prova_id', 
-            right_on='id', 
-            suffixes=('', '_prova')
-        )
-
-        # Renomeia colunas
-        apostas_completas = apostas_completas.rename(columns={
-            'nome': 'Participante',
-            'nome_prova': 'Prova',
-            'data': 'Data'
+    st.title("📊 Todas as Apostas dos Participantes (Campeonato)")
+    bets_df = get_championship_bets()
+    if bets_df.empty:
+        st.info("Nenhuma aposta de campeonato registrada ainda.")
+    else:
+        bets_df = bets_df.rename(columns={
+            "user_id": "ID Usuário",
+            "user_nome": "Participante",
+            "champion": "Campeão",
+            "vice": "Vice",
+            "team": "Equipe",
+            "bet_time": "Data da Aposta"
         })
-
-        # Seleciona colunas relevantes
-        colunas = [
-            'Participante', 'Prova', 'Data', 'pilotos', 'fichas', 
-            'piloto_11', 'data_envio', 'automatica'
-        ]
-        apostas_completas = apostas_completas[colunas]
-
-        # Ordena e exibe
-        st.dataframe(
-            apostas_completas.sort_values(['Data', 'Prova', 'Participante']),
-            use_container_width=True
-        )
-
-    except KeyError as e:
-        st.error(f"Coluna ausente nos dados: {str(e)}")
-    except Exception as e:
-        st.error(f"Erro ao processar dados: {str(e)}")
+        st.dataframe(bets_df, use_container_width=True)
