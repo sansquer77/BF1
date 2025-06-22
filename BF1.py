@@ -1545,12 +1545,13 @@ def exportar_apostas_campeonato_excel():
     return output.getvalue()
 
 def importar_apostas_campeonato_excel(arquivo_excel_bytes):
-    """Importa apostas substituindo dados existentes"""
+    """Importa apostas substituindo dados existentes e atualiza o log"""
     conn = sqlite3.connect(CHAMPIONSHIP_DB_PATH)
     cursor = conn.cursor()
     
-    # Apaga TODOS os registros existentes
+    # Apaga TODOS os registros existentes das duas tabelas
     cursor.execute('DELETE FROM championship_bets')
+    cursor.execute('DELETE FROM championship_bets_log')  # Limpa o log também
     conn.commit()
     
     # Lê e valida o Excel
@@ -1569,18 +1570,27 @@ def importar_apostas_campeonato_excel(arquivo_excel_bytes):
             equipe = row['Equipe']
             data_aposta = row.get('Data Aposta', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
             
+            # Insere na tabela principal
             cursor.execute('''
                 INSERT INTO championship_bets 
                 (user_id, user_nome, champion, vice, team, bet_time)
                 VALUES (?, ?, ?, ?, ?, ?)
             ''', (user_id, participante, campeao, vice, equipe, data_aposta))
             
+            # Insere no log (mesmos dados)
+            cursor.execute('''
+                INSERT INTO championship_bets_log 
+                (user_id, user_nome, champion, vice, team, bet_time)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (user_id, participante, campeao, vice, equipe, data_aposta))
+            
         except Exception as e:
             print(f"Erro na linha {_+2}: {str(e)}")
+            continue
     
     conn.commit()
     conn.close()
-    return "Apostas importadas com sucesso! Dados anteriores foram substituídos."
+    return "Apostas importadas com sucesso! Dados e log atualizados."
 
 def exportar_tabelas_para_excel(db_path):
     conn = sqlite3.connect(db_path)
