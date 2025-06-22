@@ -9,8 +9,14 @@ def main():
     st.title("🏆 Atualizar Resultado Final do Campeonato")
 
     # Exemplo: substitua pelos seus dados reais
-    pilotos = ["Max Verstappen", "Lewis Hamilton", "Charles Leclerc", "Sergio Perez"]
-    equipes = ["Red Bull", "Mercedes", "Ferrari", "McLaren"]
+    pilotos = [
+    "Pierre Gasly", "Jack Doohan", "Fernando Alonso", "Lance Stroll",
+    "Charles Leclerc", "Lewis Hamilton", "Esteban Ocon", "Oliver Bearman",
+    "Lando Norris", "Oscar Piastri", "Kimi Antonelli", "George Russell",
+    "Liam Lawson", "Isack Hadjar", "Max Verstappen", "Yuki Tsunoda",
+    "Nico Hulkenberg", "Gabriel Bortoleto", "Alex Albon", "Carlos Sainz"
+]
+    equipes = ["Red Bull", "Mercedes", "Ferrari", "McLaren", "Alpine", "Aston Martin", "Haas", "Racing Bulls", "Sauber", "Williams"]
 
     with st.form("final_results_form"):
         campeao = st.selectbox("Piloto Campeão", pilotos)
