@@ -788,14 +788,18 @@ if st.session_state['pagina'] == "Painel do Participante" and st.session_state['
             max_linhas = 10
             pilotos_aposta = []
             fichas_aposta = []
+            
             for i in range(max_linhas):
                 mostrar = False
+                # Sempre mostra as 3 primeiras linhas
                 if i < 3:
                     mostrar = True
-                elif i == 3 and len([p for p in pilotos_aposta if p != "Nenhum"]) == 3 and sum(fichas_aposta) < 15:
+                # Para linhas extras (4-10), mostra apenas se:
+                # - Todas as linhas anteriores estão preenchidas (não são "Nenhum")
+                # - A soma das fichas ainda não atingiu 15
+                elif i < max_linhas and len([p for p in pilotos_aposta if p != "Nenhum"]) == i and sum(fichas_aposta) < 15:
                     mostrar = True
-                elif i == 4 and len([p for p in pilotos_aposta if p != "Nenhum"]) == 4 and sum(fichas_aposta) < 15:
-                    mostrar = True
+                
                 if mostrar:
                     col1, col2 = st.columns([3,1])
                     with col1:
@@ -817,10 +821,14 @@ if st.session_state['pagina'] == "Painel do Participante" and st.session_state['
                         else:
                             pilotos_aposta.append("Nenhum")
                             fichas_aposta.append(0)
+            
+            # Filtrar apenas pilotos válidos ("Nenhum" são ignorados)
             pilotos_validos = [p for p in pilotos_aposta if p != "Nenhum"]
             fichas_validas = [f for i, f in enumerate(fichas_aposta) if pilotos_aposta[i] != "Nenhum"]
             equipes_apostadas = [pilotos_equipe[p] for p in pilotos_validos]
             total_fichas = sum(fichas_validas)
+            
+            # Opções para 11º colocado (não pode ser um piloto apostado)
             pilotos_11_opcoes = [p for p in pilotos if p not in pilotos_validos]
             if not pilotos_11_opcoes:
                 pilotos_11_opcoes = pilotos
@@ -828,11 +836,13 @@ if st.session_state['pagina'] == "Painel do Participante" and st.session_state['
                 "Palpite para 11º colocado", pilotos_11_opcoes,
                 index=pilotos_11_opcoes.index(piloto_11_ant) if piloto_11_ant in pilotos_11_opcoes else 0
             )
+            
+            # Validação e envio da aposta
             erro = None
             if st.button("Efetivar Aposta"):
                 if len(set(pilotos_validos)) != len(pilotos_validos):
                     erro = "Não é permitido apostar em dois pilotos iguais."
-                elif len(set(equipes_apostadas)) != len(equipes_apostadas):
+                elif len(set(equipes_apostadas)) < len(equipes_apostadas):
                     erro = "Não é permitido apostar em dois pilotos da mesma equipe."
                 elif len(pilotos_validos) < 3:
                     erro = "Você deve apostar em pelo menos 3 pilotos de equipes diferentes."
@@ -840,6 +850,7 @@ if st.session_state['pagina'] == "Painel do Participante" and st.session_state['
                     erro = "A soma das fichas deve ser exatamente 15."
                 elif piloto_11 in pilotos_validos:
                     erro = "O 11º colocado não pode ser um dos pilotos apostados."
+                
                 if erro:
                     st.error(erro)
                 else:
@@ -848,7 +859,6 @@ if st.session_state['pagina'] == "Painel do Participante" and st.session_state['
                         fichas_validas,
                         piloto_11, nome_prova, automatica=0
                     )
-                    aposta_str = f"Prova: {nome_prova}, Pilotos: {pilotos_validos}, Fichas: {fichas_validas}, 11º: {piloto_11}"
                     st.success("Aposta registrada/atualizada!")
                     st.cache_data.clear()
                     st.rerun()
