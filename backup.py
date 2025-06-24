@@ -20,7 +20,7 @@ def main():
 
     # Lista dos bancos definidos
     db_files = [
-        ("bolao_f1Dev.db", "Banco Principal (corridas)"),
+        ("bolao_f1.db", "Banco Principal (corridas)"),
         ("championship.db", "Banco do Campeonato")
     ]
 
