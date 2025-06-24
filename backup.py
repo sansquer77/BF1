@@ -3,11 +3,10 @@ import os
 
 def main():
     # Configurações da página
-    st.set_page_config(
-        page_title="💾 Backup dos Bancos dos Dados SQLite do BF1",
-        page_icon=":floppy_disk:",
-        layout="wide"
-    )
+
+    page_title="💾 Backup dos Bancos dos Dados SQLite do BF1",
+    page_icon=":floppy_disk:",
+    layout="wide"
 
     # Título da página
     st.title("💾 Backup dos Bancos dos Dados SQLite do BF1")
