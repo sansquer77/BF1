@@ -1533,7 +1533,7 @@ import pandas as pd
 import streamlit as st
 import os
 
-DB_PATH = 'bolao_f1Dev.db'
+DB_PATH = 'bolao_f1.db'
 CHAMPIONSHIP_DB_PATH = 'championship.db'
 
 def exportar_apostas_campeonato_excel():
