@@ -602,7 +602,7 @@ def calcular_pontuacao_lote(apostas_df, resultados_df, provas_df):
         if piloto_11 == piloto_11_real:
             pt += bonus_11
         if automatica >= 2:
-            pt = int(pt * 0.75)
+            pt = round(pt * 0.75, 2)
         pontos.append(pt)
     return pontos
 
@@ -937,7 +937,7 @@ if st.session_state['pagina'] == "Painel do Participante" and st.session_state['
                 total_pontos += pontos_11_col
     
                 if automatica and int(automatica) >= 2:
-                    total_pontos = int(total_pontos * 0.75)
+                    total_pontos = round(total_pontos * 0.75, 2)
     
                 st.markdown(f"#### {prova_nome} ({tipo_prova})")
                 st.dataframe(pd.DataFrame(dados), hide_index=True)
@@ -1295,7 +1295,9 @@ if st.session_state['pagina'] == "Classificação" and st.session_state['token']
             "Pontos por Prova": pontos_part
         })
 
-    df_class = pd.DataFrame(tabela_classificacao).sort_values("Pontos Provas", ascending=False).reset_index(drop=True)
+    df_class = pd.DataFrame(tabela_classificacao)
+    df_class = df_class.sort_values("Pontos Provas", ascending=False).reset_index(drop=True)
+    df_class["Pontos Provas"] = df_class["Pontos Provas"].apply(lambda x: f"{x:.2f}")
     st.subheader("Classificação Geral - Apenas Provas")
     st.table(df_class)
 
@@ -1331,7 +1333,10 @@ if st.session_state['pagina'] == "Classificação" and st.session_state['token']
             "Acertos Campeonato": ", ".join(acertos) if acertos else "-"
         })
 
-    df_class_completo = pd.DataFrame(tabela_classificacao_completa).sort_values("Total Geral", ascending=False).reset_index(drop=True)
+    df_class_completo = pd.DataFrame(tabela_classificacao_completa)
+    df_class_completo = df_class_completo.sort_values("Total Geral", ascending=False).reset_index(drop=True)
+    for col in ["Pontos Provas", "Pontos Campeonato", "Total Geral"]:
+        df_class_completo[col] = df_class_completo[col].apply(lambda x: f"{x:.2f}")
     st.subheader("Classificação Final (Provas + Campeonato)")
     st.table(df_class_completo)
 
@@ -1370,7 +1375,7 @@ if st.session_state['pagina'] == "Classificação" and st.session_state['token']
     # 3. Criar DataFrame cruzado
     df_cruzada = pd.DataFrame(dados_cruzados).T
     df_cruzada = df_cruzada.reindex(columns=[p['nome'] for _, p in participantes.iterrows()], fill_value=0)
-    
+    df_cruzada = df_cruzada.applymap(lambda x: f"{x:.2f}")
     st.dataframe(df_cruzada)
 
    # --------- 4. Gráfico de evolução ----------
@@ -1380,7 +1385,7 @@ if st.session_state['pagina'] == "Classificação" and st.session_state['token']
         fig = go.Figure()
         # Usar nomes das colunas diretamente do DataFrame
         for participante in df_cruzada.columns:
-            pontos_acumulados = df_cruzada[participante].cumsum()
+            pontos_acumulados = df_cruzada[participante].astype(float).cumsum()
             fig.add_trace(go.Scatter(
                 x=df_cruzada.index.tolist(),  # Nomes das provas como eixo X
                 y=pontos_acumulados,
@@ -1393,7 +1398,11 @@ if st.session_state['pagina'] == "Classificação" and st.session_state['token']
             yaxis_title="Pontuação Acumulada",
             xaxis_tickangle=-45,
             margin=dict(l=40, r=20, t=60, b=80),
-            plot_bgcolor='rgba(240,240,255,0.9)'
+            plot_bgcolor='rgba(240,240,255,0.9)',
+            yaxis=dict(
+                tickformat=',.0f',   # <-- Sem casas decimais
+                range=[100, 7000]    # <-- Limite do eixo Y
+            )
         )
         st.plotly_chart(fig, use_container_width=True)
     else:
