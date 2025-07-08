@@ -408,7 +408,7 @@ def salvar_aposta(
                     st.error(f"Erro no envio para {destinatario}: {str(e)}")
                     return False
 
-            enviar_email(email_usuario, "Confirmação de Aposta - BF1Dev", corpo_html)
+            enviar_email(email_usuario, "Confirmação de Aposta - BF1", corpo_html)
             enviar_email(EMAIL_ADMIN, f"Nova aposta de {usuario[1]}", corpo_html)
 
     except Exception as e:
@@ -1612,7 +1612,6 @@ if st.session_state['pagina'] == "Atualização de resultados" and st.session_st
             posicoes = {}
             st.markdown("**Informe o piloto para cada posição:**")
             col1, col2 = st.columns(2)
-            # Inicializa opções para cada posição
             pilotos_usados = set()
             # 1º ao 5º
             for pos in range(1, 6):
@@ -1699,8 +1698,8 @@ if st.session_state['pagina'] == "Atualização de resultados" and st.session_st
             st.warning("Cadastre provas e pilotos ativos antes de lançar resultados.")
     else:
         st.warning("Acesso restrito ao administrador/master.")
-
-
+    atualizar_classificacoes_todas_as_provas()
+    
 # --- LOG DE APOSTAS (visível para todos, mas com filtros) ---
 if st.session_state['pagina'] == "Log de Apostas" and st.session_state['token']:
     payload = get_payload()
