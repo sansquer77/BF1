@@ -786,7 +786,7 @@ def get_payload():
         st.stop()
 
     try:
-        payload = pyjwt.decode(token, os.environ.get["JWT_SECRET"], algorithms=["HS256"])
+        payload = pyjwt.decode(token, os.environ.get("JWT_SECRET"), algorithms=["HS256"])
         return payload
     except pyjwt.ExpiredSignatureError:
         st.warning("Sua sessão expirou. Faça login novamente.")
