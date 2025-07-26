@@ -49,9 +49,8 @@ def salvar_aposta(
         st.error(f"Usuário não encontrado: id={usuario_id}")
         return False
 
-    if tipo_aposta == 0:
-        return True
-
+    #if tipo_aposta == 0:
+    #    return True
     conn = None
     try:
         conn = db_connect()
