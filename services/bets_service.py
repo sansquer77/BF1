@@ -2,6 +2,7 @@ import pandas as pd
 import streamlit as st
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from typing import Optional
 
 from db.db_utils import (
     get_user_by_id,
@@ -55,7 +56,7 @@ def pode_fazer_aposta(data_prova_str, horario_prova_str, horario_usuario=None):
 
 def salvar_aposta(
     usuario_id, prova_id, pilotos, fichas, piloto_11, nome_prova,
-    automatica=0, horario_forcado=None, temporada: str | None = None
+    automatica=0, horario_forcado=None, temporada: Optional[str] = None
 ):
     # Garante tipo correto para os argumentos IDs (resolve erro de usuário não encontrado)
     try:

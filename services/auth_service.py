@@ -54,7 +54,7 @@ def _get_jwt_secret() -> str:
                 "⚠️  JWT_SECRET não configurado - usando chave de desenvolvimento. "
                 "NÃO USE EM PRODUÇÃO!"
             )
-            secret = "DEV_ONLY_bf1dev_secret_key_2025_NOT_FOR_PRODUCTION"
+            secret = "DEV_ONLY_bf1_secret_key_2025_NOT_FOR_PRODUCTION"
     
     return secret
 
