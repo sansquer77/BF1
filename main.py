@@ -32,17 +32,20 @@ def load_css():
 def load_pwa_meta_tags():
     """Adiciona meta tags para PWA e iOS Add to Home Screen."""
     # Meta tags para iOS Safari - Add to Home Screen
+    # Usar caminho absoluto para garantir que o iOS encontre o ícone
     st.markdown("""
-        <link rel="apple-touch-icon" sizes="180x180" href="app/static/apple-touch-icon.png">
-        <link rel="apple-touch-icon" sizes="152x152" href="app/static/apple-touch-icon.png">
-        <link rel="apple-touch-icon" sizes="120x120" href="app/static/apple-touch-icon.png">
-        <link rel="apple-touch-icon" href="app/static/apple-touch-icon.png">
+        <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+        <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+        <link rel="apple-touch-icon" sizes="152x152" href="/static/apple-touch-icon.png">
+        <link rel="apple-touch-icon" sizes="120x120" href="/static/apple-touch-icon.png">
+        <link rel="icon" type="image/png" sizes="192x192" href="/static/apple-touch-icon.png">
+        <link rel="icon" type="image/png" sizes="512x512" href="/static/apple-touch-icon.png">
         <meta name="apple-mobile-web-app-capable" content="yes">
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-        <meta name="apple-mobile-web-app-title" content="BF1 Bolão">
+        <meta name="apple-mobile-web-app-title" content="BF1">
         <meta name="mobile-web-app-capable" content="yes">
         <meta name="theme-color" content="#0a0a0f">
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     """, unsafe_allow_html=True)
 
 load_css()

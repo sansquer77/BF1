@@ -1,0 +1,15 @@
+[server]
+# Habilitar serving de arquivos estáticos da pasta /static
+enableStaticServing = true
+
+[browser]
+# Título da aba do navegador
+gatherUsageStats = false
+
+[theme]
+# Tema escuro para combinar com o Liquid Glass
+base = "dark"
+primaryColor = "#E13427"
+backgroundColor = "#0a0a0f"
+secondaryBackgroundColor = "#1a1a2e"
+textColor = "#ffffff"
