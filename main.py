@@ -31,21 +31,73 @@ def load_css():
 
 def load_pwa_meta_tags():
     """Adiciona meta tags para PWA e iOS Add to Home Screen."""
-    # Meta tags para iOS Safari - Add to Home Screen
-    # Usar caminho absoluto para garantir que o iOS encontre o ícone
+    import base64
+    from pathlib import Path
+    
+    # Carregar ícone 180x180 como base64 (tamanho ideal para iOS)
+    icon_path = Path(__file__).parent / "static" / "apple-touch-icon-180.png"
+    if not icon_path.exists():
+        icon_path = Path(__file__).parent / "static" / "apple-touch-icon.png"
+    
+    icon_base64 = ""
+    if icon_path.exists():
+        with open(icon_path, "rb") as f:
+            icon_base64 = base64.b64encode(f.read()).decode()
+    
+    # Usar JavaScript para injetar as meta tags no <head> do documento
+    # Isso é necessário porque st.markdown coloca conteúdo no body
+    if icon_base64:
+        icon_data_uri = f"data:image/png;base64,{icon_base64}"
+        st.markdown(f"""
+            <script>
+                (function() {{
+                    // Remover meta tags antigas se existirem
+                    document.querySelectorAll('link[rel="apple-touch-icon"]').forEach(el => el.remove());
+                    
+                    // Criar e adicionar novas meta tags no head
+                    var head = document.getElementsByTagName('head')[0];
+                    
+                    // Apple Touch Icon
+                    var link = document.createElement('link');
+                    link.rel = 'apple-touch-icon';
+                    link.href = '{icon_data_uri}';
+                    head.appendChild(link);
+                    
+                    var link180 = document.createElement('link');
+                    link180.rel = 'apple-touch-icon';
+                    link180.sizes = '180x180';
+                    link180.href = '{icon_data_uri}';
+                    head.appendChild(link180);
+                    
+                    // Verificar/adicionar meta tags PWA
+                    if (!document.querySelector('meta[name="apple-mobile-web-app-capable"]')) {{
+                        var meta1 = document.createElement('meta');
+                        meta1.name = 'apple-mobile-web-app-capable';
+                        meta1.content = 'yes';
+                        head.appendChild(meta1);
+                    }}
+                    
+                    if (!document.querySelector('meta[name="apple-mobile-web-app-title"]')) {{
+                        var meta2 = document.createElement('meta');
+                        meta2.name = 'apple-mobile-web-app-title';
+                        meta2.content = 'BF1';
+                        head.appendChild(meta2);
+                    }}
+                    
+                    if (!document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]')) {{
+                        var meta3 = document.createElement('meta');
+                        meta3.name = 'apple-mobile-web-app-status-bar-style';
+                        meta3.content = 'black-translucent';
+                        head.appendChild(meta3);
+                    }}
+                }})();
+            </script>
+        """, unsafe_allow_html=True)
+    
+    # Meta tags básicas que funcionam no body também
     st.markdown("""
-        <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
-        <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
-        <link rel="apple-touch-icon" sizes="152x152" href="/static/apple-touch-icon.png">
-        <link rel="apple-touch-icon" sizes="120x120" href="/static/apple-touch-icon.png">
-        <link rel="icon" type="image/png" sizes="192x192" href="/static/apple-touch-icon.png">
-        <link rel="icon" type="image/png" sizes="512x512" href="/static/apple-touch-icon.png">
-        <meta name="apple-mobile-web-app-capable" content="yes">
-        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-        <meta name="apple-mobile-web-app-title" content="BF1">
         <meta name="mobile-web-app-capable" content="yes">
         <meta name="theme-color" content="#0a0a0f">
-        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     """, unsafe_allow_html=True)
 
 load_css()
