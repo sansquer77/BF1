@@ -78,7 +78,7 @@ def gerar_imagem_prova(df_cruzada, prova_selecionada):
         pass
     table = ax.table(
         cellText=df_prova.values,
-        rowLabels=df_prova.index.tolist(),
+        rowLabels=df_prova.index,
         colLabels=[prova_selecionada],
         cellLoc='center',
         loc='center'
@@ -220,7 +220,7 @@ def main():
         df_class['Movimentação'] = "Novo"
 
     pontos_float = [float(x.replace('.', '').replace(',', '.')) for x in df_class["Pontos Provas"]]
-    diferencas: list[float] = [0.0]
+    diferencas = [0]
     for i in range(1, len(pontos_float)):
         diferencas.append(pontos_float[i-1] - pontos_float[i])
     df_class["Diferença"] = ["-" if i == 0 else formatar_brasileiro(d) for i, d in enumerate(diferencas)]
@@ -292,7 +292,7 @@ def main():
         columns=[p['nome'] for _, p in participantes.iterrows()],
         fill_value=0
     )
-    df_formatado = df_cruzada.map(lambda x: formatar_brasileiro(float(x)))
+    df_formatado = df_cruzada.applymap(lambda x: formatar_brasileiro(float(x)))
     df_styled = destacar_heatmap(df_formatado, resultados_df, provas_ids_ordenados)
     st.dataframe(df_styled)
 
@@ -316,19 +316,17 @@ def main():
 
     st.subheader("Evolução da Pontuação Acumulada")
     provas_com_resultado_ids = resultados_df['prova_id'].unique()
-    provas_filtradas = provas_df[provas_df['id'].isin(provas_com_resultado_ids)].copy()
-    provas_filtradas = provas_filtradas.sort_values(by='id')  # type: ignore[call-overload]
-    provas_com_resultado_nomes = provas_filtradas['nome'].tolist()
+    provas_com_resultado_nomes = provas_df[provas_df['id'].isin(provas_com_resultado_ids)].sort_values('id')['nome'].tolist()
     df_grafico = df_cruzada.loc[df_cruzada.index.isin(provas_com_resultado_nomes)]
     df_grafico = df_grafico.reindex(provas_com_resultado_nomes)
     def texto_para_float(x):
         if isinstance(x, float):
             return x
         return float(str(x).replace('.', '').replace(',', '.'))
-    df_grafico_float = df_grafico.apply(lambda col: col.map(texto_para_float))
+    df_grafico_float = df_grafico.applymap(texto_para_float)
     if not df_grafico_float.empty:
         fig = go.Figure()
-        for participante in list(df_grafico_float.columns):
+        for participante in df_grafico_float.columns:
             pontos_acumulados = df_grafico_float[participante].cumsum()
             fig.add_trace(go.Scatter(
                 x=df_grafico_float.index.tolist(),

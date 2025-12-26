@@ -15,7 +15,7 @@ from pathlib import Path
 
 # ============ CONFIGURAR PÁGINA PRIMEIRO ============
 st.set_page_config(
-    page_title="BF1",
+    page_title="BF1Dev",
     page_icon="🏁",
     layout="wide",
     initial_sidebar_state="auto"
@@ -60,7 +60,7 @@ from db.db_utils import init_db
 from db.migrations import run_migrations
 from db.master_user_manager import MasterUserManager
 
-logger.info("🚀 Inicializando BF1 3.0...")
+logger.info("🚀 Inicializando BF1Dev 3.0...")
 
 # Inicializar banco de dados
 init_db()

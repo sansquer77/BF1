@@ -19,20 +19,11 @@ class MasterUserManager:
     Lê credenciais das variáveis de ambiente (Digital Ocean)
     """
     
-    # Nomes das variáveis de ambiente (suporta maiúsculas e minúsculas)
-    ENV_VAR_NOME = ['USUARIO_MASTER', 'usuario_master']
-    ENV_VAR_EMAIL = ['EMAIL_MASTER', 'email_master']
-    ENV_VAR_SENHA = ['SENHA_MASTER', 'senha_master']
-    ENV_VAR_TELEGRAM = ['TELEGRAM_ADMIN', 'telegram_admin']  # Opcional
-    
-    @staticmethod
-    def _get_env_value(keys: list, source: dict) -> Optional[str]:
-        """Busca valor em múltiplas chaves (maiúscula/minúscula)"""
-        for key in keys:
-            value = source.get(key)
-            if value:
-                return value
-        return None
+    # Nomes das variáveis de ambiente
+    ENV_VAR_NOME = 'USUARIO_MASTER'
+    ENV_VAR_EMAIL = 'EMAIL_MASTER'
+    ENV_VAR_SENHA = 'SENHA_MASTER'
+    ENV_VAR_TELEGRAM = 'TELEGRAM_ADMIN'  # Opcional
     
     @staticmethod
     def _get_credentials() -> Optional[Dict[str, str]]:
@@ -43,8 +34,6 @@ class MasterUserManager:
         1. st.secrets (Streamlit Cloud)
         2. os.environ (Digital Ocean, Local com .env)
         
-        Suporta variáveis em MAIÚSCULAS ou minúsculas.
-        
         Returns:
             Dict com credenciais ou None se não encontradas
         """
@@ -52,34 +41,32 @@ class MasterUserManager:
             # Tenta st.secrets primeiro (Streamlit Cloud) - com try/except
             try:
                 if hasattr(st, 'secrets') and st.secrets:
-                    secrets_dict = dict(st.secrets)
-                    nome = MasterUserManager._get_env_value(MasterUserManager.ENV_VAR_NOME, secrets_dict)
-                    email = MasterUserManager._get_env_value(MasterUserManager.ENV_VAR_EMAIL, secrets_dict)
-                    senha = MasterUserManager._get_env_value(MasterUserManager.ENV_VAR_SENHA, secrets_dict)
+                    nome = st.secrets.get(MasterUserManager.ENV_VAR_NOME)
+                    email = st.secrets.get(MasterUserManager.ENV_VAR_EMAIL)
+                    senha = st.secrets.get(MasterUserManager.ENV_VAR_SENHA)
                     
                     if nome and email and senha:
                         return {
                             'nome': nome,
                             'email': email,
                             'senha': senha,
-                            'telegram': MasterUserManager._get_env_value(MasterUserManager.ENV_VAR_TELEGRAM, secrets_dict)
+                            'telegram': st.secrets.get(MasterUserManager.ENV_VAR_TELEGRAM)
                         }
             except:
                 # Se st.secrets falhar, continua com variáveis de ambiente
                 pass
             
             # Fallback para variáveis de ambiente (Digital Ocean App Platform)
-            env_dict = dict(os.environ)
-            nome = MasterUserManager._get_env_value(MasterUserManager.ENV_VAR_NOME, env_dict)
-            email = MasterUserManager._get_env_value(MasterUserManager.ENV_VAR_EMAIL, env_dict)
-            senha = MasterUserManager._get_env_value(MasterUserManager.ENV_VAR_SENHA, env_dict)
+            nome = os.environ.get(MasterUserManager.ENV_VAR_NOME)
+            email = os.environ.get(MasterUserManager.ENV_VAR_EMAIL)
+            senha = os.environ.get(MasterUserManager.ENV_VAR_SENHA)
             
             if nome and email and senha:
                 return {
                     'nome': nome,
                     'email': email,
                     'senha': senha,
-                    'telegram': MasterUserManager._get_env_value(MasterUserManager.ENV_VAR_TELEGRAM, env_dict)
+                    'telegram': os.environ.get(MasterUserManager.ENV_VAR_TELEGRAM)
                 }
             
             return None
