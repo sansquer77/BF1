@@ -301,7 +301,9 @@ def participante_view():
                             total_pontos = total_pontos * 2
                         penalidade_auto = 0
                         if automatica and int(automatica) >= 2:
-                            desconto = round(total_pontos * 0.8, 2)
+                            penalidade_auto_percent = regras.get('penalidade_auto_percent', 20)
+                            fator = max(0, 1 - (float(penalidade_auto_percent) / 100))
+                            desconto = round(total_pontos * fator, 2)
                             penalidade_auto = round(total_pontos - desconto, 2)
                             total_pontos = desconto
                         st.markdown(f"#### {prova_nome} ({tipo_prova})")
