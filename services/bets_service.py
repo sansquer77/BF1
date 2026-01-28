@@ -519,7 +519,7 @@ def calcular_pontuacao_lote(ap_df, res_df, prov_df, temporada_descarte=None):
         # Seleciona tabela de pontos da REGRA.
         # Corridas Sprint sempre usam a tabela de sprint; regra_sprint só afeta fichas/minimo, não a tabela.
         if tipo == 'Sprint':
-            pontos_tabela = regras.get('pontos_sprint_posicoes') or ([])
+            pontos_tabela = regras.get('pontos_sprint_posicoes') or regras.get('pontos_posicoes') or ([])
             if not pontos_tabela:
                 pontos_tabela = PONTOS_SPRINT
         else:

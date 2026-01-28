@@ -259,7 +259,7 @@ def participante_view():
                         dados = []
                         total_pontos = 0
                         if tipo_prova == 'Sprint':
-                            pontos_lista = regras.get('pontos_sprint_posicoes') or []
+                            pontos_lista = regras.get('pontos_sprint_posicoes') or regras.get('pontos_posicoes') or []
                             if not pontos_lista:
                                 pontos_lista = pontos_sprint
                         else:

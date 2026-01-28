@@ -83,6 +83,7 @@ def get_regras_aplicaveis(temporada: str, tipo_prova: str = "Normal") -> Dict:
         "pontos_campeao": regra['pontos_campeao'],
         "pontos_vice": regra['pontos_vice'],
         "pontos_equipe": regra['pontos_equipe'],
+        "pontos_sprint_posicoes": regra.get('pontos_sprint_posicoes', []),
         "min_pilotos": min_pilotos  # Alias para compatibilidade
     }
     
