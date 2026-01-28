@@ -127,7 +127,7 @@ def login_view():
             
             submit_button = st.form_submit_button(
                 "🚀 Entrar",
-                use_container_width=True,
+                width="stretch",
                 type="primary"
             )
         
@@ -230,7 +230,7 @@ def login_view():
             st.write("Informe seu email para receber uma senha temporária.")
             with st.form("forgot_password_form", clear_on_submit=True):
                 email_reset = st.text_input("📧 Email", placeholder="seu@email.com", key="reset_email")
-                reset_submit = st.form_submit_button("Enviar senha temporária", use_container_width=True)
+                reset_submit = st.form_submit_button("Enviar senha temporária", width="stretch")
 
             if reset_submit:
                 if not email_reset:

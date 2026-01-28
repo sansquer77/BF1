@@ -151,10 +151,10 @@ def main():
                 "Pilotos/Fichas": "Pilotos/Fichas",
                 "piloto_11": "11º Colocado"
             }),
-            use_container_width=True
+            width="stretch"
         )
     else:
-        st.dataframe(filtro_show, use_container_width=True)
+        st.dataframe(filtro_show, width="stretch")
 
     st.caption("*O campo 'Automática' indica apostas geradas automaticamente pelo sistema (qualquer valor > 0 no campo).*")
 

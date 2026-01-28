@@ -60,7 +60,7 @@ def main():
         if driver_standings.empty:
             st.info("📅 Dados não disponíveis para esta temporada.")
         else:
-            st.dataframe(driver_standings, use_container_width=True)
+            st.dataframe(driver_standings, width="stretch")
             # Exibir campeão em destaque
             if len(driver_standings) > 0:
                 champion = driver_standings.iloc[0]
@@ -78,7 +78,7 @@ def main():
             else:
                 st.info("📅 Dados não disponíveis para esta temporada.")
         else:
-            st.dataframe(constructor_standings, use_container_width=True)
+            st.dataframe(constructor_standings, width="stretch")
             # Exibir construtor campeão em destaque
             if len(constructor_standings) > 0:
                 constructor_champion = constructor_standings.iloc[0]
@@ -95,7 +95,7 @@ def main():
         else:
             # Limitar número de pilotos exibidos no gráfico para melhor visualização
             with st.expander("📊 Ver Tabela Completa de Pontos"):
-                st.dataframe(points_df, use_container_width=True)
+                st.dataframe(points_df, width="stretch")
             
             # Gráfico de linha
             chart_data = points_df.drop(columns=["Race"]).set_index("Round")
@@ -126,7 +126,7 @@ def main():
         if delta_df.empty:
             st.info("📅 Nenhuma corrida realizada ainda ou dados não disponíveis.")
         else:
-            st.dataframe(delta_df, use_container_width=True)
+            st.dataframe(delta_df, width="stretch")
             # Destacar maior subida e maior queda
             if len(delta_df) > 0:
                 max_gain = delta_df.loc[delta_df['Delta'].idxmax()]
@@ -150,7 +150,7 @@ def main():
             else:
                 st.info("📅 Nenhuma corrida realizada ainda ou dados não disponíveis.")
         else:
-            st.dataframe(fastest_laps, use_container_width=True)
+            st.dataframe(fastest_laps, width="stretch")
             # Destacar volta mais rápida
             if len(fastest_laps) > 0:
                 fastest = fastest_laps.iloc[0]
@@ -168,7 +168,7 @@ def main():
             else:
                 st.info("📅 Nenhuma corrida realizada ainda ou dados não disponíveis.")
         else:
-            st.dataframe(pit_stops, use_container_width=True)
+            st.dataframe(pit_stops, width="stretch")
             # Estatísticas de pit stops
             if len(pit_stops) > 0:
                 avg_stops = pit_stops.groupby('Driver')['Stop'].max().mean()

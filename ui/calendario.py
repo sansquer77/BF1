@@ -48,7 +48,7 @@ def main():
         'tipo': 'Tipo'
     }
     df_exibir = df[list(colunas.keys())].rename(columns=colunas)
-    st.dataframe(df_exibir, use_container_width=True)
+    st.dataframe(df_exibir, width="stretch")
 
 
 if __name__ == "__main__":

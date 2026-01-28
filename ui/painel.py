@@ -126,7 +126,7 @@ def participante_view():
                             on_change=_on_prova_change
                         )
                     with col_btn:
-                        if st.button("Ver regras", use_container_width=True):
+                        if st.button("Ver regras", width="stretch"):
                             prova_nome_sel = provas[provas['id'] == prova_id]['nome'].values[0]
                             tipo_raw = provas[provas['id'] == prova_id]['tipo'].values[0] if not provas[provas['id'] == prova_id].empty else 'Normal'
                             tipo_sel = 'Sprint' if str(tipo_raw).strip().lower() == 'sprint' or 'sprint' in str(prova_nome_sel).lower() else 'Normal'
@@ -411,7 +411,7 @@ def participante_view():
                     title=f"Evolução da Posição - {user_nome_logado if user_nome_logado else 'Você'}",
                     showlegend=False
                 )
-                st.plotly_chart(fig_pos, use_container_width=True)
+                st.plotly_chart(fig_pos, width="stretch")
             else:
                 st.info("Ainda não há histórico de posições para o seu usuário.")
         else:

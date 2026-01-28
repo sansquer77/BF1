@@ -21,7 +21,7 @@ def main():
     with st.expander("Lista Completa de Usuários", expanded=True):
         show_df = df[["id", "nome", "email", "perfil", "status"]].copy()
         show_df.columns = ["ID", "Nome", "Email", "Perfil", "Status"]
-        st.dataframe(show_df, use_container_width=True)
+        st.dataframe(show_df, width="stretch")
 
     st.markdown("### Editar Usuário")
 

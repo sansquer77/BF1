@@ -441,7 +441,7 @@ def regra_form(regra_atual=None):
             
             submitted = st.form_submit_button(
                 f"{'💾 Atualizar' if is_edit else '✅ Criar'} Regra",
-                use_container_width=True,
+                width="stretch",
                 type="primary"
             )
             

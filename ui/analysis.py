@@ -113,7 +113,7 @@ def main():
                     df_filtrado, names='piloto', values='total_apostas',
                     title=f"Apostas de {participante}"
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
 
     with tab2:
         st.subheader("Distribuição do 11º Colocado - Individual")
@@ -127,7 +127,7 @@ def main():
                     contagem, names='Piloto', values='Total',
                     title=f"Pilotos apostados como 11º por {participante}"
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
                 st.dataframe(contagem)
         else:
             st.info("Nenhuma aposta registrada para o 11º colocado.")
@@ -140,8 +140,8 @@ def main():
                 consolidado_pilotos, names='piloto', values='total_apostas',
                 title="Distribuição Geral de Apostas por Piloto"
             )
-            st.plotly_chart(fig, use_container_width=True)
-            st.dataframe(consolidado_pilotos, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
+            st.dataframe(consolidado_pilotos, width="stretch")
         else:
             st.info("Nenhuma aposta registrada para pilotos.")
 
@@ -154,7 +154,7 @@ def main():
                 consolidado_11, names='Piloto', values='Total',
                 title="Distribuição Geral de Pilotos apostados como 11º"
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
             st.dataframe(consolidado_11)
         else:
             st.info("Nenhuma aposta registrada para o 11º colocado.")
@@ -199,7 +199,7 @@ def main():
                     'qtd_apostas': int(apostas_df[apostas_df['prova_id'] == rid].shape[0]) if not apostas_df.empty else 0
                 })
             diag = pd.DataFrame(linhas)
-            st.dataframe(diag, use_container_width=True)
+            st.dataframe(diag, width="stretch")
             st.caption("Tipo resolvido usa coluna 'tipo' ou contém 'Sprint' no nome. Pontos e parâmetros vêm das regras da temporada.")
 
 if __name__ == "__main__":

@@ -46,7 +46,7 @@ def _render_tabela_provas(df: pd.DataFrame):
     
     show_df = df[cols_display].copy()
     show_df.columns = col_names
-    st.dataframe(show_df, use_container_width=True)
+    st.dataframe(show_df, width="stretch")
 
 
 def _render_aba_editar(df: pd.DataFrame):

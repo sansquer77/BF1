@@ -380,7 +380,7 @@ def main():
         columns=df_class['Participante'].tolist(),
         fill_value=0
     )
-    df_formatado = df_cruzada.applymap(lambda x: formatar_brasileiro(float(x)))
+    df_formatado = df_cruzada.map(lambda x: formatar_brasileiro(float(x)))
     df_styled = destacar_heatmap(df_formatado, resultados_df, provas_ids_ordenados)
     st.dataframe(df_styled)
 
@@ -410,7 +410,7 @@ def main():
     def texto_para_float(x):
         if isinstance(x, float): return x
         return float(str(x).replace('.', '').replace(',', '.'))
-    df_grafico_float = df_grafico.applymap(texto_para_float)
+    df_grafico_float = df_grafico.map(texto_para_float)
     if not df_grafico_float.empty:
         fig = go.Figure()
         for participante in df_grafico_float.columns:
@@ -430,7 +430,7 @@ def main():
             plot_bgcolor='rgba(240,240,255,0.9)',
             yaxis=dict(tickformat=',.0f')
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
 
     st.subheader("Classificação de Cada Participante ao Longo do Campeonato")
     with db_connect() as conn:
@@ -453,7 +453,7 @@ def main():
                 ))
         fig_all.update_yaxes(autorange="reversed")
         fig_all.update_layout(xaxis_title="Prova", yaxis_title="Posição", legend_title="Participante")
-        st.plotly_chart(fig_all, use_container_width=True)
+        st.plotly_chart(fig_all, width="stretch")
 
 if __name__ == "__main__":
     main()
