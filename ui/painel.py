@@ -67,20 +67,24 @@ def participante_view():
 
     @st.dialog("Regras vigentes")
     def _mostrar_regras_dialog(regras, temporada_sel, tipo_prova_sel):
+        is_sprint = str(tipo_prova_sel).strip().lower() == 'sprint'
+        regra_sprint = bool(regras.get('regra_sprint'))
+        fichas_exibir = regras.get('quantidade_fichas', 15)
+        min_pilotos_exibir = regras.get('qtd_minima_pilotos', regras.get('min_pilotos', 3))
+        if is_sprint and regra_sprint:
+            fichas_exibir = 10
+            min_pilotos_exibir = 2
+
         st.markdown(f"**Temporada:** {temporada_sel}")
         st.markdown(f"**Tipo de prova:** {tipo_prova_sel}")
-        st.markdown(f"**Fichas:** {regras.get('quantidade_fichas', 15)}")
-        st.markdown(f"**Mín. pilotos:** {regras.get('qtd_minima_pilotos', regras.get('min_pilotos', 3))}")
+        st.markdown(f"**Fichas:** {fichas_exibir}")
+        st.markdown(f"**Mín. pilotos:** {min_pilotos_exibir}")
         st.markdown(f"**Fichas por piloto:** {regras.get('fichas_por_piloto', '-')}")
         st.markdown(f"**Bônus 11º:** {regras.get('pontos_11_colocado', 25)}")
         st.markdown(f"**Pontos dobrados (Sprint):** {'Sim' if regras.get('pontos_dobrada') else 'Não'}")
         st.markdown(f"**Penalidade abandono:** {'Sim' if regras.get('penalidade_abandono') else 'Não'}")
         if regras.get('penalidade_abandono'):
             st.markdown(f"**Pontos penalidade:** {regras.get('pontos_penalidade', 0)}")
-        pts = regras.get('pontos_posicoes', []) or []
-        if pts:
-            st.markdown("**Tabela de pontos:**")
-            st.write(", ".join(map(str, pts)))
 
     # ------------------ Aba: Apostas ----------------------
     if not force_change:
