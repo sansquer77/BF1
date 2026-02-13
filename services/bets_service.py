@@ -109,6 +109,11 @@ def salvar_aposta(
         if show_errors:
             st.error(f"Usuário não encontrado: id={usuario_id}")
         return False
+    status_usuario = str(usuario.get('status', '')).strip().lower()
+    if status_usuario and status_usuario != 'ativo':
+        if show_errors:
+            st.error("Usuário inativo não pode efetuar apostas.")
+        return False
 
     try:
         with db_connect() as conn:
@@ -154,6 +159,37 @@ def salvar_aposta(
                 # Aposta tardia não salva quando não permitido
                 if show_errors:
                     st.error("Aposta fora do horário limite.")
+                try:
+                    tentativa_str = agora_sp.strftime('%d/%m/%Y %H:%M:%S')
+                    limite_str = horario_limite.strftime('%d/%m/%Y %H:%M:%S')
+                    corpo_email = (
+                        f"<p>Olá {html.escape(usuario['nome'])},</p>"
+                        f"<p>Sua aposta para a prova <b>{html.escape(nome_prova_bd)}</b> não foi efetivada.</p>"
+                        "<p><b>Motivo:</b> prazo encerrado (aposta fora do horário limite).</p>"
+                        f"<p><b>Horário limite:</b> {limite_str} (America/Sao_Paulo)</p>"
+                        f"<p><b>Horário da tentativa:</b> {tentativa_str} (America/Sao_Paulo)</p>"
+                        "<p>Se precisar de ajuda, fale com a administração.</p>"
+                    )
+                    enviar_email(usuario['email'], f"Aposta não efetivada - {nome_prova_bd}", corpo_email)
+                except Exception as e:
+                    logger.warning(f"Falha ao enviar email de aposta rejeitada para {usuario.get('email')}: {e}")
+                try:
+                    registrar_log_aposta(
+                        usuario_id=usuario_id,
+                        prova_id=prova_id,
+                        apostador=usuario['nome'],
+                        pilotos=dados_pilotos,
+                        aposta=dados_fichas,
+                        nome_prova=nome_prova_bd,
+                        piloto_11=piloto_11,
+                        tipo_aposta=tipo_aposta,
+                        automatica=automatica,
+                        horario=agora_sp,
+                        temporada=temporada,
+                        status='Rejeitada'
+                    )
+                except Exception as e:
+                    logger.warning(f"Falha ao registrar log de aposta rejeitada para {usuario.get('email')}: {e}")
                 return False
             conn.commit()
 
@@ -191,6 +227,8 @@ def salvar_aposta(
         return False
 
     registrar_log_aposta(
+        usuario_id=usuario_id,
+        prova_id=prova_id,
         apostador=usuario['nome'],
         pilotos=dados_pilotos,
         aposta=dados_fichas,
@@ -199,12 +237,15 @@ def salvar_aposta(
         tipo_aposta=tipo_aposta,
         automatica=automatica,
         horario=agora_sp,
-        temporada=temporada
+        temporada=temporada,
+        status='Registrada'
     )
     return True
 
 def gerar_aposta_aleatoria(pilotos_df):
     import random
+    if not pilotos_df.empty and 'status' in pilotos_df.columns:
+        pilotos_df = pilotos_df[pilotos_df['status'] == 'Ativo']
     equipes_unicas = [e for e in pilotos_df['equipe'].unique().tolist() if e]
     if len(equipes_unicas) < 3 or pilotos_df.empty:
         return [], [], None
@@ -242,6 +283,8 @@ def gerar_aposta_aleatoria_com_regras(pilotos_df, regras: dict):
     """
     import random
     import math
+    if not pilotos_df.empty and 'status' in pilotos_df.columns:
+        pilotos_df = pilotos_df[pilotos_df['status'] == 'Ativo']
     if pilotos_df.empty:
         return [], [], None
     equipes_unicas = [e for e in pilotos_df['equipe'].unique().tolist() if e]
@@ -412,24 +455,81 @@ def gerar_aposta_automatica(usuario_id, prova_id, nome_prova, apostas_df, provas
     if not aposta_existente.empty:
         return False, "Já existe aposta manual para esta prova."
         
-    prova_ant_id = prova_id - 1
-    ap_ant = apostas_df[(apostas_df['usuario_id'] == usuario_id) & (apostas_df['prova_id'] == prova_ant_id)]
+    ap_ant = pd.DataFrame()
+    prova_id_min = None
+    try:
+        prova_id_min = int(provas_df['id'].min()) if not provas_df.empty else None
+    except Exception:
+        prova_id_min = None
+
+    # Encontrar a prova anterior pela data/horario (na mesma temporada)
+    try:
+        provas_tmp = provas_df.copy()
+        if 'data' in provas_tmp.columns:
+            provas_tmp['__data_dt'] = pd.to_datetime(provas_tmp['data'], errors='coerce')
+        else:
+            provas_tmp['__data_dt'] = pd.NaT
+        provas_tmp['__hora_str'] = provas_tmp.get('horario_prova', '00:00:00')
+        provas_tmp['__hora_dt'] = pd.to_datetime(provas_tmp['__hora_str'], format='%H:%M:%S', errors='coerce')
+        provas_tmp['__hora_dt'] = provas_tmp['__hora_dt'].fillna(
+            pd.to_datetime('00:00:00', format='%H:%M:%S')
+        )
+        provas_tmp['__prova_dt'] = provas_tmp['__data_dt'] + pd.to_timedelta(
+            provas_tmp['__hora_dt'].dt.hour, unit='h'
+        ) + pd.to_timedelta(
+            provas_tmp['__hora_dt'].dt.minute, unit='m'
+        ) + pd.to_timedelta(
+            provas_tmp['__hora_dt'].dt.second, unit='s'
+        )
+        provas_tmp = provas_tmp.sort_values(['__prova_dt', 'id'])
+
+        prova_atual_row = provas_tmp[provas_tmp['id'] == prova_id]
+        if not prova_atual_row.empty:
+            prova_atual_dt = prova_atual_row.iloc[0]['__prova_dt']
+            provas_anteriores = provas_tmp[provas_tmp['__prova_dt'] < prova_atual_dt]
+            if not provas_anteriores.empty:
+                prova_ant_id = int(provas_anteriores.iloc[-1]['id'])
+                ap_ant = apostas_df[
+                    (apostas_df['usuario_id'] == usuario_id) &
+                    (apostas_df['prova_id'] == prova_ant_id)
+                ]
+    except Exception:
+        ap_ant = pd.DataFrame()
+
+    if ap_ant.empty:
+        try:
+            provas_sorted = provas_df.sort_values('id')
+            prev_rows = provas_sorted[provas_sorted['id'] < prova_id]
+            if not prev_rows.empty:
+                prova_ant_id = int(prev_rows.iloc[-1]['id'])
+                ap_ant = apostas_df[
+                    (apostas_df['usuario_id'] == usuario_id) &
+                    (apostas_df['prova_id'] == prova_ant_id)
+                ]
+        except Exception:
+            ap_ant = pd.DataFrame()
     
+    pilotos_df = get_pilotos_df()
+    if not pilotos_df.empty and 'status' in pilotos_df.columns:
+        pilotos_df = pilotos_df[pilotos_df['status'] == 'Ativo']
+
     if not ap_ant.empty:
         ap_ant = ap_ant.iloc[0]
         pilotos_ant = [p.strip() for p in ap_ant['pilotos'].split(",")]
         fichas_ant = list(map(int, ap_ant['fichas'].split(",")))
         piloto_11_ant = ap_ant['piloto_11'].strip()
         # Ajustar aposta copiada para obedecer regras da prova atual (ex.: Sprint x Normal)
-        pilotos_aj, fichas_aj = ajustar_aposta_para_regras(pilotos_ant, fichas_ant, regras, get_pilotos_df())
+        pilotos_aj, fichas_aj = ajustar_aposta_para_regras(pilotos_ant, fichas_ant, regras, pilotos_df)
         if not pilotos_aj:
             # Se não conseguir ajustar, gera aleatória com regras
-            pilotos_ant, fichas_ant, piloto_11_ant = gerar_aposta_aleatoria_com_regras(get_pilotos_df(), regras)
+            pilotos_ant, fichas_ant, piloto_11_ant = gerar_aposta_aleatoria_com_regras(pilotos_df, regras)
         else:
             pilotos_ant, fichas_ant = pilotos_aj, fichas_aj
     else:
-        # Gerar aposta aleatória respeitando regras da temporada e tipo da prova
-        pilotos_ant, fichas_ant, piloto_11_ant = gerar_aposta_aleatoria_com_regras(get_pilotos_df(), regras)
+        # Gerar aleatoria apenas na primeira prova do campeonato
+        if prova_id_min is not None and prova_id != prova_id_min:
+            return False, "Sem aposta anterior para copiar. Gere apenas na primeira prova."
+        pilotos_ant, fichas_ant, piloto_11_ant = gerar_aposta_aleatoria_com_regras(pilotos_df, regras)
         
     if not pilotos_ant:
         return False, "Não há dados válidos para gerar aposta automática."

@@ -263,6 +263,95 @@ def get_usuarios_df() -> pd.DataFrame:
     with db_connect() as conn:
         return pd.read_sql_query(f"SELECT {', '.join(cols)} FROM usuarios", conn)
 
+
+def _usuarios_status_historico_exists(conn) -> bool:
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='usuarios_status_historico'"
+    )
+    return cursor.fetchone() is not None
+
+
+def get_participantes_temporada_df(temporada: Optional[str] = None) -> pd.DataFrame:
+    """Retorna participantes ativos na temporada selecionada.
+
+    Se a tabela de historico de status existir, considera o status ativo no periodo.
+    Caso contrario, retorna todos os usuarios (para manter compatibilidade).
+    """
+    if temporada is None:
+        temporada = str(datetime.datetime.now().year)
+    season_start = f"{temporada}-01-01 00:00:00"
+    season_end = f"{temporada}-12-31 23:59:59"
+
+    cols = _get_existing_columns('usuarios')
+    with db_connect() as conn:
+        if not _usuarios_status_historico_exists(conn):
+            return pd.read_sql_query(f"SELECT {', '.join(cols)} FROM usuarios", conn)
+
+        query = f"""
+            SELECT DISTINCT u.{', u.'.join(cols)}
+            FROM usuarios u
+            JOIN usuarios_status_historico h ON h.usuario_id = u.id
+            WHERE h.status = 'Ativo'
+              AND datetime(h.inicio_em) <= datetime(?)
+              AND (h.fim_em IS NULL OR datetime(h.fim_em) >= datetime(?))
+        """
+        return pd.read_sql_query(query, conn, params=(season_end, season_start))
+
+
+def registrar_historico_status_usuario(
+    usuario_id: int,
+    novo_status: str,
+    alterado_por: Optional[int] = None,
+    motivo: Optional[str] = None,
+    data_referencia: Optional[str] = None,
+) -> None:
+    """Registra alteracao de status do usuario no historico.
+
+    Fecha o periodo anterior e abre um novo registro com o status informado.
+    """
+    if data_referencia is None:
+        data_referencia = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    with db_connect() as conn:
+        cursor = conn.cursor()
+        if not _usuarios_status_historico_exists(conn):
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS usuarios_status_historico (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    usuario_id INTEGER NOT NULL,
+                    status TEXT NOT NULL,
+                    inicio_em TIMESTAMP NOT NULL,
+                    fim_em TIMESTAMP,
+                    alterado_por INTEGER,
+                    motivo TEXT,
+                    FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+                )
+            ''')
+
+        cursor.execute(
+            "SELECT id, status FROM usuarios_status_historico WHERE usuario_id = ? AND fim_em IS NULL ORDER BY inicio_em DESC LIMIT 1",
+            (usuario_id,)
+        )
+        row = cursor.fetchone()
+        if row and row[1] == novo_status:
+            return
+
+        if row:
+            cursor.execute(
+                "UPDATE usuarios_status_historico SET fim_em = ? WHERE id = ?",
+                (data_referencia, row[0])
+            )
+
+        cursor.execute(
+            """
+            INSERT INTO usuarios_status_historico (usuario_id, status, inicio_em, fim_em, alterado_por, motivo)
+            VALUES (?, ?, ?, NULL, ?, ?)
+            """,
+            (usuario_id, novo_status, data_referencia, alterado_por, motivo)
+        )
+        conn.commit()
+
 def get_pilotos_df() -> pd.DataFrame:
     """Retorna todos os pilotos como DataFrame"""
     cols = _get_existing_columns('pilotos')
@@ -338,6 +427,9 @@ def registrar_log_aposta(*args, **kwargs):
         automatica = kwargs.get('automatica')
         horario = kwargs.get('horario')
         temporada = kwargs.get('temporada', str(datetime.datetime.now().year))
+        status = kwargs.get('status', 'Registrada')
+        usuario_id = kwargs.get('usuario_id')
+        prova_id = kwargs.get('prova_id')
 
         # Derivar data/horario strings
         data_str = None
@@ -378,16 +470,32 @@ def registrar_log_aposta(*args, **kwargs):
             # Check if temporada column exists
             c.execute("PRAGMA table_info('log_apostas')")
             cols = [r[1] for r in c.fetchall()]
+            insert_cols = [
+                'apostador', 'aposta', 'nome_prova', 'pilotos', 'piloto_11',
+                'tipo_aposta', 'automatica', 'data', 'horario'
+            ]
+            insert_vals = [
+                apostador, aposta, nome_prova, pilotos, piloto_11,
+                tipo_aposta, automatica, data_str, horario_str
+            ]
+            if 'usuario_id' in cols:
+                insert_cols.insert(0, 'usuario_id')
+                insert_vals.insert(0, usuario_id)
+            if 'prova_id' in cols:
+                insert_cols.insert(1, 'prova_id')
+                insert_vals.insert(1, prova_id)
             if 'temporada' in cols:
-                c.execute(
-                    'INSERT INTO log_apostas (apostador, aposta, nome_prova, pilotos, piloto_11, tipo_aposta, automatica, data, horario, temporada) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                    (apostador, aposta, nome_prova, pilotos, piloto_11, tipo_aposta, automatica, data_str, horario_str, temporada)
-                )
-            else:
-                c.execute(
-                    'INSERT INTO log_apostas (apostador, aposta, nome_prova, pilotos, piloto_11, tipo_aposta, automatica, horario) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                    (apostador, aposta, nome_prova, pilotos, piloto_11, tipo_aposta, automatica, horario_str)
-                )
+                insert_cols.append('temporada')
+                insert_vals.append(temporada)
+            if 'status' in cols:
+                insert_cols.append('status')
+                insert_vals.append(status)
+            placeholders = ', '.join(['?'] * len(insert_cols))
+            cols_sql = ', '.join(insert_cols)
+            c.execute(
+                f'INSERT INTO log_apostas ({cols_sql}) VALUES ({placeholders})',
+                tuple(insert_vals)
+            )
             conn.commit()
             logger.info(f"✓ Aposta log registrada (log_apostas): {apostador} - {nome_prova}")
         return

@@ -42,6 +42,9 @@ O BF1-2026 terá início, oficialmente, em 08 de março, no dia do GP da Austrá
 - A pontuação do participante será a multiplicação das fichas apostadas em cada piloto pelo número de pontos que ele obteve na prova (fichas x pontos) mais a pontuação do 11º lugar e menos as punições por não terminar a prova.
 - As apostas e apurações ficam neste sistema, sendo o placar atualizado publicado no grupo e WhatsApp após as corridas.
 
+**Regra de Descarte**
+- Ao final do campeonato, cada participante terá o direito de descartar a pontuação de sua pior corrida, ou seja, aquela em que obteve a menor pontuação.
+
 **Critérios de Desempate**
 - Caso haja empate de pontos na classificação final, as posições serão definidas nesta ordem:
     1. Quem mais vezes acertou o 11º lugar.
