@@ -1,7 +1,8 @@
 import pandas as pd
 import logging
-from datetime import datetime, timezone
-from db.db_utils import db_connect, get_user_by_id
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
+from db.db_utils import db_connect, get_user_by_id, get_provas_df
 from services.rules_service import get_regras_aplicaveis
 
 logger = logging.getLogger(__name__)
@@ -10,6 +11,65 @@ logger = logging.getLogger(__name__)
 def _season_or_current(season: int | None) -> int:
     """Retorna a temporada fornecida ou o ano corrente."""
     return season if season is not None else datetime.now().year
+
+def _parse_datetime_sp(date_str: str, time_str: str) -> datetime:
+    """Parseia data/hora e retorna datetime com timezone America/Sao_Paulo."""
+    fmts = ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"]
+    for fmt in fmts:
+        try:
+            dt = datetime.strptime(f"{date_str} {time_str}", fmt)
+            return dt.replace(tzinfo=ZoneInfo("America/Sao_Paulo"))
+        except ValueError:
+            continue
+    raise ValueError(f"Formato de data/hora invalido: '{date_str} {time_str}'")
+
+def can_place_championship_bet(season: int | None = None, now: datetime | None = None) -> tuple[bool, str, datetime | None]:
+    """Valida se apostas do campeonato estao abertas para a temporada.
+
+    Regra: bloqueia a partir de 1 minuto apos o horario da primeira prova.
+    Retorna (pode, mensagem, deadline_sp).
+    """
+    season_val = _season_or_current(season)
+    try:
+        provas_df = get_provas_df(str(season_val))
+        if provas_df.empty:
+            return True, "Sem provas cadastradas; apostas liberadas.", None
+
+        if "status" in provas_df.columns:
+            provas_df = provas_df[provas_df["status"].fillna("").str.lower() != "inativa"]
+            if provas_df.empty:
+                return True, "Sem provas ativas; apostas liberadas.", None
+
+        dt_list = []
+        for _, row in provas_df.iterrows():
+            data_str = str(row.get("data", "")).strip()
+            horario_str = str(row.get("horario_prova", "00:00:00") or "00:00:00").strip()
+            if not data_str:
+                continue
+            try:
+                dt_list.append(_parse_datetime_sp(data_str, horario_str))
+            except Exception:
+                continue
+
+        if not dt_list:
+            return True, "Nao foi possivel calcular o prazo; apostas liberadas.", None
+
+        primeira_prova = min(dt_list)
+        deadline = primeira_prova + timedelta(minutes=1)
+
+        now_sp = now or datetime.now(ZoneInfo("America/Sao_Paulo"))
+        if now_sp.tzinfo is None:
+            now_sp = now_sp.replace(tzinfo=ZoneInfo("America/Sao_Paulo"))
+
+        if now_sp > deadline:
+            msg = f"Apostas bloqueadas. Prazo encerrou em {deadline.strftime('%d/%m/%Y %H:%M:%S')} (SP)."
+            return False, msg, deadline
+
+        msg = f"Apostas liberadas ate {deadline.strftime('%d/%m/%Y %H:%M:%S')} (SP)."
+        return True, msg, deadline
+    except Exception as e:
+        logger.exception(f"Erro ao validar prazo de aposta do campeonato (season={season_val}): {e}")
+        return True, "Erro ao validar prazo; apostas liberadas.", None
 
 def get_user_name(user_id: int) -> str:
     """Obtém o nome do usuário pelo ID."""
@@ -28,6 +88,9 @@ def save_championship_bet(user_id: int, user_nome: str, champion: str, vice: str
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     season_val = _season_or_current(season)
     try:
+        pode, _, _ = can_place_championship_bet(season_val)
+        if not pode:
+            return False
         usuario = get_user_by_id(user_id)
         if not usuario:
             return False
