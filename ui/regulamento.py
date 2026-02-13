@@ -67,7 +67,7 @@ Para dúvidas, consulte a administração ou acesse o grupo oficial do BF1 e lem
         </div>
         <script type="text/javascript" async src="https://tenor.com/embed.js"></script>
         """,
-        height=260,
+        height=520,
     )
 
 if __name__ == "__main__":
