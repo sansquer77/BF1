@@ -325,7 +325,7 @@ def participante_view():
                             dados.append({
                                 "Piloto Apostado": aposta_piloto,
                                 "Fichas": ficha,
-                                "Posição Real": pos_real if pos_real is not None else "-",
+                                "Posição Real": str(pos_real) if pos_real is not None else "-",
                                 "Pontos": f"{pontos:.2f}"
                             })
                         piloto_11_real = str(posicoes_dict.get(11, "")).strip()
