@@ -6,10 +6,11 @@ from db.db_utils import (
     get_provas_df,
     get_apostas_df,
     get_resultados_df,
-    get_participantes_temporada_df
+    get_participantes_temporada_df,
+    usuarios_status_historico_disponivel
 )
-from db.backup_utils import list_temporadas
 from services.rules_service import get_regras_aplicaveis
+from utils.season_utils import get_season_options
 
 def _get_participantes_temporada(temporada: str | None = None) -> pd.DataFrame:
     participantes_df = get_participantes_temporada_df(temporada)
@@ -170,14 +171,14 @@ def get_distribuicao_piloto_11(temporada: str | None = None, participantes_df: p
 def main():
     st.title("📊 Análise Detalhada das Apostas")
 
+    if not usuarios_status_historico_disponivel():
+        st.warning(
+            "⚠️ Aviso técnico: histórico de status de usuários indisponível. "
+            "As análises por temporada podem considerar o status atual de participantes."
+        )
+
     # Seletor de temporada para diagnósticos
-    try:
-        season_options = list_temporadas() or []
-    except Exception:
-        season_options = []
-    if not season_options:
-        import datetime as dt
-        season_options = [str(dt.datetime.now().year)]
+    season_options = get_season_options()
     season = st.selectbox("Temporada", season_options, key="analysis_season")
     participantes_df = _get_participantes_temporada(season)
 

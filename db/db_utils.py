@@ -9,6 +9,7 @@ from pathlib import Path
 import bcrypt
 import logging
 import os
+from functools import lru_cache
 from typing import Optional, Dict
 from db.connection_pool import get_pool, init_pool
 from db.db_config import BCRYPT_ROUNDS, DB_PATH
@@ -180,15 +181,22 @@ def init_db():
         # Inicializar regras
         init_rules_table()
         conn.commit()
+        _get_existing_columns_cached.cache_clear()
         logger.info("✓ Banco de dados inicializado com sucesso")
 
 # ============ OPERAÇÕES CRUD ============
 
-def _get_existing_columns(table: str, preferred: Optional[list[str]] = None) -> list[str]:
+@lru_cache(maxsize=64)
+def _get_existing_columns_cached(table: str) -> tuple[str, ...]:
     with db_connect() as conn:
         c = conn.cursor()
         c.execute(f"PRAGMA table_info('{table}')")
-        cols = [r[1] for r in c.fetchall()]
+        cols = tuple(r[1] for r in c.fetchall())
+    return cols
+
+
+def _get_existing_columns(table: str, preferred: Optional[list[str]] = None) -> list[str]:
+    cols = list(_get_existing_columns_cached(table))
     if preferred:
         return [c for c in preferred if c in cols]
     return cols
@@ -272,11 +280,17 @@ def _usuarios_status_historico_exists(conn) -> bool:
     return cursor.fetchone() is not None
 
 
+def usuarios_status_historico_disponivel() -> bool:
+    """Indica se há histórico de status de usuários para filtros sazonais confiáveis."""
+    with db_connect() as conn:
+        return _usuarios_status_historico_exists(conn)
+
+
 def get_participantes_temporada_df(temporada: Optional[str] = None) -> pd.DataFrame:
     """Retorna participantes ativos na temporada selecionada.
 
     Se a tabela de historico de status existir, considera o status ativo no periodo.
-    Caso contrario, retorna todos os usuarios (para manter compatibilidade).
+    Caso contrario, usa o status atual do cadastro de usuarios.
     """
     if temporada is None:
         temporada = str(datetime.datetime.now().year)
@@ -286,13 +300,22 @@ def get_participantes_temporada_df(temporada: Optional[str] = None) -> pd.DataFr
     cols = _get_existing_columns('usuarios')
     with db_connect() as conn:
         if not _usuarios_status_historico_exists(conn):
+            if 'status' in cols:
+                return pd.read_sql_query(
+                    f"""
+                    SELECT {', '.join(cols)}
+                    FROM usuarios
+                    WHERE lower(trim(coalesce(status, ''))) = 'ativo'
+                    """,
+                    conn,
+                )
             return pd.read_sql_query(f"SELECT {', '.join(cols)} FROM usuarios", conn)
 
         query = f"""
             SELECT DISTINCT u.{', u.'.join(cols)}
             FROM usuarios u
             JOIN usuarios_status_historico h ON h.usuario_id = u.id
-            WHERE h.status = 'Ativo'
+                        WHERE lower(trim(coalesce(h.status, ''))) = 'ativo'
               AND datetime(h.inicio_em) <= datetime(?)
               AND (h.fim_em IS NULL OR datetime(h.fim_em) >= datetime(?))
         """
