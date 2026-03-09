@@ -15,12 +15,49 @@ from utils.datetime_utils import now_sao_paulo, parse_datetime_sao_paulo
 from utils.season_utils import get_default_season_index, get_season_options
 
 
+def _parse_data_prova(data_raw):
+    """Parse tolerante para datas de prova (yyyy-mm-dd e formatos locais)."""
+    if data_raw is None:
+        return None
+    raw = str(data_raw).strip()
+    if not raw:
+        return None
+
+    for dayfirst in (True, False):
+        parsed = pd.to_datetime(raw, errors='coerce', dayfirst=dayfirst)
+        if pd.notna(parsed):
+            return parsed
+    return None
+
+
+def _parse_evento_prova_dt(data_raw, hora_raw, tzinfo):
+    data_dt = _parse_data_prova(data_raw)
+    if data_dt is None:
+        return None
+
+    data_iso = data_dt.strftime("%Y-%m-%d")
+    hora = str(hora_raw or "00:00")
+    try:
+        return parse_datetime_sao_paulo(data_iso, hora)
+    except Exception:
+        # Se o horário vier inválido, mantém ao menos a data para ordenação estável.
+        return datetime.datetime(
+            data_dt.year,
+            data_dt.month,
+            data_dt.day,
+            0,
+            0,
+            tzinfo=tzinfo,
+        )
+
+
 def _get_proxima_prova_id(provas_df: pd.DataFrame):
     """Retorna o ID da próxima prova (data/hora >= agora em Sao Paulo)."""
     if provas_df.empty or 'id' not in provas_df.columns:
         return None
 
     agora_sp = now_sao_paulo()
+    tzinfo = agora_sp.tzinfo
     candidatas_futuras = []
     candidatas_passadas = []
 
@@ -30,10 +67,8 @@ def _get_proxima_prova_id(provas_df: pd.DataFrame):
         if prova_id is None or not data_raw:
             continue
 
-        hora_raw = row.get('horario_prova', '00:00') or '00:00'
-        try:
-            evento_dt = parse_datetime_sao_paulo(str(data_raw), str(hora_raw))
-        except Exception:
+        evento_dt = _parse_evento_prova_dt(data_raw, row.get('horario_prova', '00:00'), tzinfo)
+        if evento_dt is None:
             continue
 
         if evento_dt >= agora_sp:
@@ -121,10 +156,18 @@ def participante_view():
             provas_df = get_provas_df(temporada)
             try:
                 if not provas_df.empty and 'data' in provas_df.columns:
-                    provas_df['__data_dt'] = pd.to_datetime(provas_df['data'], errors='coerce')
+                    provas_df['__data_dt'] = provas_df['data'].apply(_parse_data_prova)
+                    provas_df['__evento_dt'] = provas_df.apply(
+                        lambda row: _parse_evento_prova_dt(
+                            row.get('data'),
+                            row.get('horario_prova', '00:00'),
+                            now_sao_paulo().tzinfo,
+                        ),
+                        axis=1,
+                    )
                     provas = provas_df[provas_df['__data_dt'].apply(lambda x: str(x.year) == str(temporada) if pd.notna(x) else False)]
                     if not provas.empty:
-                        provas = provas.sort_values(['__data_dt', 'id']).reset_index(drop=True)
+                        provas = provas.sort_values(['__evento_dt', '__data_dt', 'id']).reset_index(drop=True)
                 else:
                     provas = pd.DataFrame()
             except Exception:

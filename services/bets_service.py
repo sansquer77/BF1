@@ -4,6 +4,7 @@ import logging
 import os
 import json
 import ast
+import hashlib
 import importlib
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -244,6 +245,164 @@ def _get_contexto_temporada_atual_ergast() -> dict:
         pass
 
     return contexto
+
+
+def _norm_nome_piloto(nome: str) -> str:
+    return str(nome or "").strip().lower()
+
+
+def _estimar_pontos_aposta_ergast(
+    pilotos: list[str],
+    fichas: list[int],
+    piloto_11: str,
+    tipo_prova: str,
+    regras: dict,
+    contexto_ergast: dict,
+) -> dict:
+    """Estima pontos da aposta usando sinais compactos da Ergast (tp/du/vr).
+
+    Não altera regra de pontuação oficial; serve apenas para comentário preditivo em email.
+    """
+    pontos_f1 = [25, 18, 15, 12, 10, 8, 6, 4, 2, 1]
+    pontos_sprint = [8, 7, 6, 5, 4, 3, 2, 1]
+
+    is_sprint = str(tipo_prova).strip().lower() == "sprint"
+    if is_sprint:
+        pontos_lista = regras.get("pontos_sprint_posicoes") or regras.get("pontos_posicoes") or pontos_sprint
+    else:
+        pontos_lista = regras.get("pontos_posicoes") or pontos_f1
+
+    tp = contexto_ergast.get("tp", []) if isinstance(contexto_ergast, dict) else []
+    du = contexto_ergast.get("du", {}) if isinstance(contexto_ergast, dict) else {}
+    vr = contexto_ergast.get("vr", []) if isinstance(contexto_ergast, dict) else []
+
+    pos_por_nome: dict[str, int] = {}
+    for row in tp if isinstance(tp, list) else []:
+        nome = _norm_nome_piloto(row.get("n"))
+        pos = int(row.get("p", 0) or 0)
+        if nome and pos > 0:
+            pos_por_nome[nome] = pos
+
+    delta_por_nome: dict[str, int] = {}
+    if isinstance(du, dict):
+        for row in du.get("top", []) if isinstance(du.get("top", []), list) else []:
+            nome = _norm_nome_piloto(row.get("n"))
+            delta_por_nome[nome] = int(row.get("d", 0) or 0)
+        for row in du.get("bot", []) if isinstance(du.get("bot", []), list) else []:
+            nome = _norm_nome_piloto(row.get("n"))
+            delta_por_nome[nome] = int(row.get("d", 0) or 0)
+
+    vr_set = {
+        _norm_nome_piloto(row.get("n"))
+        for row in vr if isinstance(vr, list)
+        if _norm_nome_piloto(row.get("n"))
+    }
+
+    total_estimado = 0.0
+    detalhes_linhas: list[str] = []
+
+    for piloto, ficha in zip(pilotos, fichas):
+        nome_key = _norm_nome_piloto(piloto)
+        try:
+            ficha_i = int(ficha)
+        except Exception:
+            ficha_i = 0
+
+        if ficha_i <= 0:
+            continue
+
+        pos = pos_por_nome.get(nome_key)
+        if pos is not None and 1 <= pos <= len(pontos_lista):
+            base = float(pontos_lista[pos - 1])
+            origem = f"pos{pos}"
+        elif pos is not None:
+            base = 0.0
+            origem = f"pos{pos}"
+        else:
+            # Piloto fora do top da Ergast compactada: baseline conservador.
+            base = 0.6 if len(pontos_lista) >= 10 else 0.3
+            origem = "fora_top"
+
+        delta = int(delta_por_nome.get(nome_key, 0))
+        mult_delta = 1.0 + max(-0.15, min(0.20, delta * 0.03))
+        mult_vr = 1.05 if nome_key in vr_set else 1.0
+
+        estimado_piloto = max(0.0, base * mult_delta * mult_vr * ficha_i)
+        total_estimado += estimado_piloto
+        detalhes_linhas.append(
+            f"{piloto}: ficha={ficha_i}, base={base:.1f}, delta={delta}, vr={'sim' if nome_key in vr_set else 'nao'}, ref={origem}"
+        )
+
+    bonus_11 = float(regras.get("pontos_11_colocado", 25) or 25)
+    p11_key = _norm_nome_piloto(piloto_11)
+    p11_pos = pos_por_nome.get(p11_key)
+    if p11_pos is None:
+        chance_11 = 0.22
+    elif 9 <= p11_pos <= 13:
+        chance_11 = 0.35
+    elif p11_pos <= 5:
+        chance_11 = 0.10
+    else:
+        chance_11 = 0.20
+
+    bonus_11_estimado = bonus_11 * chance_11
+    total_estimado += bonus_11_estimado
+
+    return {
+        "pontos_estimados": round(total_estimado, 1),
+        "bonus_11_estimado": round(bonus_11_estimado, 1),
+        "chance_11": int(round(chance_11 * 100)),
+        "criterios": "Ergast(tp/du/vr) + regras da prova",
+        "detalhes": " | ".join(detalhes_linhas[:5]),
+    }
+
+
+def _gerar_copy_email_aposta(
+    nome_usuario: str,
+    nome_prova: str,
+    pilotos: list[str],
+    fichas: list[int],
+    piloto_11: str,
+    pontos_estimados: Optional[float],
+    probabilidade: Optional[Union[int, float]],
+) -> tuple[str, str]:
+    """Gera abertura/fechamento mais humanos com variação determinística por aposta."""
+    assinatura = (
+        f"{nome_usuario}|{nome_prova}|{','.join(pilotos)}|{','.join(map(str, fichas))}|{piloto_11}|{pontos_estimados}|{probabilidade}"
+    )
+    seed = int(hashlib.sha256(assinatura.encode("utf-8")).hexdigest()[:8], 16)
+
+    aberturas = [
+        "Seu pitwall confirmou a estratégia e a aposta já está no grid.",
+        "A equipe validou o plano: aposta registrada e pronta para luzes apagarem.",
+        "Missão concluída no box: sua combinação foi salva com sucesso.",
+        "Aposta travada no sistema. Agora é torcer para a leitura de corrida bater.",
+        "Tudo certo por aqui: sua cartela entrou oficialmente na prova.",
+    ]
+
+    fechamentos = [
+        "Que venha a corrida. Se bater, é visão estratégica; se não bater, foi apenas entretenimento de alto nível.",
+        "Agora é com o cronômetro e um pouco de caos controlado de fim de semana de F1.",
+        "Boa sorte no fim de semana. Planejamento você já fez; o resto é com o asfalto.",
+        "Se essa leitura encaixar, tem cara de domingo feliz no bolão.",
+        "Respira e confia: a estratégia já foi para pista.",
+    ]
+
+    abertura = aberturas[seed % len(aberturas)]
+
+    fecho_base = fechamentos[(seed // 7) % len(fechamentos)]
+    if probabilidade is not None:
+        try:
+            prob_i = int(float(probabilidade))
+        except Exception:
+            prob_i = None
+        if prob_i is not None:
+            if prob_i >= 70:
+                fecho_base = "A estimativa está confiante. Se o roteiro colaborar, essa aposta pode render forte."
+            elif prob_i <= 35:
+                fecho_base = "A leitura indica risco alto, mas é exatamente daí que saem as histórias boas do bolão."
+
+    return abertura, fecho_base
 
 
 def _canonical_json(data: dict) -> str:
@@ -646,30 +805,66 @@ def salvar_aposta(
             conn.commit()
 
             try:
+                contexto_ergast_email = _get_contexto_temporada_atual_ergast()
+                estimativa_email = _estimar_pontos_aposta_ergast(
+                    pilotos=pilotos,
+                    fichas=fichas,
+                    piloto_11=piloto_11,
+                    tipo_prova=tipo_prova,
+                    regras=regras,
+                    contexto_ergast=contexto_ergast_email,
+                )
+                pontos_estimados = estimativa_email.get("pontos_estimados")
+                bonus_11_estimado = estimativa_email.get("bonus_11_estimado")
+                chance_11 = estimativa_email.get("chance_11")
+                criterios_estimativa = str(estimativa_email.get("criterios", "Ergast + regras da prova"))
+                detalhes_estimativa = str(estimativa_email.get("detalhes", "")).strip()
+
                 analise = gerar_analise_aposta_com_probabilidade(
                     nome_usuario=usuario.get('nome', ''),
                     contexto_aposta=f"Prova {nome_prova_bd}",
                     detalhes_aposta=(
                         f"Pilotos: {', '.join(pilotos)}; "
                         f"Fichas: {', '.join(map(str, fichas))}; "
-                        f"11º: {piloto_11}"
+                        f"11º: {piloto_11}; "
+                        f"Estimativa de pontos (Ergast): {pontos_estimados}; "
+                        f"Bônus 11º esperado: {bonus_11_estimado} ({chance_11}%); "
+                        f"Critérios: {criterios_estimativa}; "
+                        f"Sinais: {detalhes_estimativa}"
                     ),
                 )
                 comentario = str(analise.get("comentario", "")).strip()
                 probabilidade = analise.get("probabilidade")
                 resumo = str(analise.get("resumo", "")).strip()
 
+                abertura_email, fechamento_email = _gerar_copy_email_aposta(
+                    nome_usuario=str(usuario.get('nome', 'Participante')),
+                    nome_prova=nome_prova_bd,
+                    pilotos=pilotos,
+                    fichas=fichas,
+                    piloto_11=piloto_11,
+                    pontos_estimados=(float(pontos_estimados) if pontos_estimados is not None else None),
+                    probabilidade=probabilidade,
+                )
+
                 previsao_html = ""
                 if comentario:
                     previsao_html += "<p><b>Comentário sarcástico:</b><br>" + "<br>".join(html.escape(comentario).splitlines()) + "</p>"
+                if pontos_estimados is not None:
+                    previsao_html += (
+                        f"<p><b>Estimativa de pontos (Ergast):</b> {float(pontos_estimados):.1f} "
+                        f"<small>(bônus 11º esperado: {float(bonus_11_estimado):.1f}, chance 11º: {int(chance_11)}%)</small></p>"
+                    )
                 if probabilidade is not None:
                     previsao_html += f"<p><b>Probabilidade estimada de acerto:</b> {int(probabilidade)}%</p>"
                 if resumo:
                     previsao_html += "<p><b>Base da estimativa:</b> " + html.escape(resumo) + "</p>"
+                previsao_html += "<p><small><b>Critérios Ergast:</b> " + html.escape(criterios_estimativa) + "</small></p>"
 
                 corpo_email = (
                     f"<p>Olá {html.escape(usuario['nome'])},</p>"
                     f"<p>Sua aposta para a prova <b>{html.escape(nome_prova_bd)}</b> foi registrada com sucesso.</p>"
+                    f"<p>{html.escape(abertura_email)}</p>"
                     "<p><b>Detalhes:</b></p>"
                     "<ul>"
                     f"<li>Pilotos: {html.escape(', '.join(pilotos))}</li>"
@@ -678,7 +873,7 @@ def salvar_aposta(
                     "</ul>"
                     f"{previsao_html}"
                     "<p><small><b>Aviso de estimativa:</b> a probabilidade informada é apenas uma projeção estatística/opinativa com base em informações disponíveis e pode variar a qualquer momento. Não constitui garantia de resultado esportivo nem direito a pontuação, prevalecendo sempre as regras oficiais do bolão.</small></p>"
-                    "<p>Boa sorte!</p>"
+                    f"<p>{html.escape(fechamento_email)}</p>"
                 )
                 enviar_email(usuario['email'], f"Aposta registrada - {nome_prova_bd}", corpo_email)
             except Exception as e:

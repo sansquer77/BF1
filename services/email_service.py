@@ -123,7 +123,8 @@ def gerar_previsao_sarcastica(nome_usuario: str, nome_prova: str, pilotos: list[
                         "Você é um especialista em F1 divertido e sarcástico. "
                         "Faça uma previsão bem-humorada e ácida sobre a aposta do participante analisando os pilotos escolhidos e as fichas apostadas, "
                         "sem ofensas pessoais, sem palavrões e sem humilhações. "
-                        "Use 1 a 2 frases curtas."
+                        "Use 1 a 2 frases curtas. "
+                        "Escreva em tom humano e natural, com vocabulário variado, evitando clichês e frases repetidas de respostas anteriores."
                     )
                 },
                 {
