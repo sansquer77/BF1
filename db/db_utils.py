@@ -9,6 +9,7 @@ from pathlib import Path
 import bcrypt
 import logging
 import os
+import re
 from functools import lru_cache
 from typing import Optional
 from db.connection_pool import get_pool, init_pool
@@ -186,11 +187,44 @@ def init_db():
 
 # ============ OPERAÇÕES CRUD ============
 
+SAFE_DYNAMIC_TABLES = {
+    "usuarios",
+    "pilotos",
+    "provas",
+    "apostas",
+    "resultados",
+    "log_apostas",
+    "regras",
+    "login_attempts",
+    "posicoes_participantes",
+    "usuarios_status_historico",
+}
+
+
+def _sanitize_identifier(identifier: str) -> str:
+    value = (identifier or "").strip()
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value):
+        raise ValueError(f"Identificador SQL inválido: {identifier}")
+    return value
+
+
+def _validate_dynamic_table_name(table: str) -> str:
+    table_name = _sanitize_identifier(table)
+    if table_name not in SAFE_DYNAMIC_TABLES:
+        raise ValueError(f"Tabela não permitida para SQL dinâmico: {table_name}")
+    return table_name
+
+
+def _quote_identifier(identifier: str) -> str:
+    sanitized = _sanitize_identifier(identifier)
+    return f'"{sanitized}"'
+
 @lru_cache(maxsize=64)
 def _get_existing_columns_cached(table: str) -> tuple[str, ...]:
+    table_name = _validate_dynamic_table_name(table)
     with db_connect() as conn:
         c = conn.cursor()
-        c.execute(f"PRAGMA table_info('{table}')")
+        c.execute(f"PRAGMA table_info('{table_name}')")
         cols = tuple(r[1] for r in c.fetchall())
     return cols
 
@@ -213,9 +247,10 @@ def get_user_by_email(email: str) -> Optional[dict]:
         Dict com dados do usuário ou None
     """
     cols = _get_existing_columns('usuarios')
+    cols_sql = ', '.join(_quote_identifier(c) for c in cols)
     with db_connect() as conn:
         c = conn.cursor()
-        c.execute(f"SELECT {', '.join(cols)} FROM usuarios WHERE email = ?", (email,))
+        c.execute(f"SELECT {cols_sql} FROM usuarios WHERE email = ?", (email,))
         row = c.fetchone()
         
         if row:
@@ -256,9 +291,10 @@ def get_user_by_id(user_id: int) -> Optional[dict]:
         Dict com dados do usuário ou None
     """
     cols = _get_existing_columns('usuarios')
+    cols_sql = ', '.join(_quote_identifier(c) for c in cols)
     with db_connect() as conn:
         c = conn.cursor()
-        c.execute(f"SELECT {', '.join(cols)} FROM usuarios WHERE id = ?", (user_id,))
+        c.execute(f"SELECT {cols_sql} FROM usuarios WHERE id = ?", (user_id,))
         row = c.fetchone()
         
         if row:
@@ -268,8 +304,9 @@ def get_user_by_id(user_id: int) -> Optional[dict]:
 def get_usuarios_df() -> pd.DataFrame:
     """Retorna todos os usuários como DataFrame"""
     cols = _get_existing_columns('usuarios')
+    cols_sql = ', '.join(_quote_identifier(c) for c in cols)
     with db_connect() as conn:
-        return pd.read_sql_query(f"SELECT {', '.join(cols)} FROM usuarios", conn)
+        return pd.read_sql_query(f"SELECT {cols_sql} FROM usuarios", conn)
 
 
 def _usuarios_status_historico_exists(conn) -> bool:
@@ -298,21 +335,22 @@ def get_participantes_temporada_df(temporada: Optional[str] = None) -> pd.DataFr
     season_end = f"{temporada}-12-31 23:59:59"
 
     cols = _get_existing_columns('usuarios')
+    cols_sql = ', '.join(_quote_identifier(c) for c in cols)
     with db_connect() as conn:
         if not _usuarios_status_historico_exists(conn):
             if 'status' in cols:
                 return pd.read_sql_query(
                     f"""
-                    SELECT {', '.join(cols)}
+                    SELECT {cols_sql}
                     FROM usuarios
                     WHERE lower(trim(coalesce(status, ''))) = 'ativo'
                     """,
                     conn,
                 )
-            return pd.read_sql_query(f"SELECT {', '.join(cols)} FROM usuarios", conn)
+            return pd.read_sql_query(f"SELECT {cols_sql} FROM usuarios", conn)
 
         query = f"""
-            SELECT DISTINCT u.{', u.'.join(cols)}
+            SELECT DISTINCT {', '.join(f'u.{_quote_identifier(c)}' for c in cols)}
             FROM usuarios u
             JOIN usuarios_status_historico h ON h.usuario_id = u.id
                         WHERE lower(trim(coalesce(h.status, ''))) = 'ativo'
@@ -429,8 +467,9 @@ def registrar_historico_status_usuario(
 def get_pilotos_df() -> pd.DataFrame:
     """Retorna todos os pilotos como DataFrame"""
     cols = _get_existing_columns('pilotos')
+    cols_sql = ', '.join(_quote_identifier(c) for c in cols)
     with db_connect() as conn:
-        return pd.read_sql_query(f"SELECT {', '.join(cols)} FROM pilotos", conn)
+        return pd.read_sql_query(f"SELECT {cols_sql} FROM pilotos", conn)
 
 def _read_table_df(table: str, temporada: Optional[str] = None, columns: Optional[list[str]] = None) -> pd.DataFrame:
     """Helper: read table into DataFrame, filtering by `temporada` when column exists.
@@ -438,20 +477,21 @@ def _read_table_df(table: str, temporada: Optional[str] = None, columns: Optiona
     If `temporada` is None, defaults to current year as string.
     Includes NULL temporada rows for backward compatibility with existing data.
     """
+    table_name = _validate_dynamic_table_name(table)
     if temporada is None:
         temporada = str(datetime.datetime.now().year)
     cols = _get_existing_columns(table, columns)
+    cols_sql = ', '.join(_quote_identifier(c) for c in cols)
     with db_connect() as conn:
-        c = conn.cursor()
         if 'temporada' in cols:
             # Include rows where temporada matches OR temporada is NULL (backward compat)
             return pd.read_sql_query(
-                f"SELECT {', '.join(cols)} FROM {table} WHERE temporada = ? OR temporada IS NULL",
+                f"SELECT {cols_sql} FROM {table_name} WHERE temporada = ? OR temporada IS NULL",
                 conn,
                 params=(temporada,)
             )
         else:
-            return pd.read_sql_query(f"SELECT {', '.join(cols)} FROM {table}", conn)
+            return pd.read_sql_query(f"SELECT {cols_sql} FROM {table_name}", conn)
 
 
 def get_provas_df(temporada: Optional[str] = None) -> pd.DataFrame:

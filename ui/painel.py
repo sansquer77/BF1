@@ -11,7 +11,46 @@ from db.db_utils import (
 from services.bets_service import salvar_aposta, calcular_pontuacao_lote, gerar_aposta_sem_ideias
 from services.auth_service import check_password, hash_password
 from services.rules_service import get_regras_aplicaveis
+from utils.datetime_utils import now_sao_paulo, parse_datetime_sao_paulo
 from utils.season_utils import get_default_season_index, get_season_options
+
+
+def _get_proxima_prova_id(provas_df: pd.DataFrame):
+    """Retorna o ID da próxima prova (data/hora >= agora em Sao Paulo)."""
+    if provas_df.empty or 'id' not in provas_df.columns:
+        return None
+
+    agora_sp = now_sao_paulo()
+    candidatas_futuras = []
+    candidatas_passadas = []
+
+    for _, row in provas_df.iterrows():
+        prova_id = row.get('id')
+        data_raw = row.get('data')
+        if prova_id is None or not data_raw:
+            continue
+
+        hora_raw = row.get('horario_prova', '00:00') or '00:00'
+        try:
+            evento_dt = parse_datetime_sao_paulo(str(data_raw), str(hora_raw))
+        except Exception:
+            continue
+
+        if evento_dt >= agora_sp:
+            candidatas_futuras.append((evento_dt, prova_id))
+        else:
+            candidatas_passadas.append((evento_dt, prova_id))
+
+    if candidatas_futuras:
+        candidatas_futuras.sort(key=lambda item: item[0])
+        return candidatas_futuras[0][1]
+
+    # Fallback: se a temporada já passou inteira, mantém a mais recente.
+    if candidatas_passadas:
+        candidatas_passadas.sort(key=lambda item: item[0], reverse=True)
+        return candidatas_passadas[0][1]
+
+    return None
 
 def participante_view():
     if 'token' not in st.session_state or 'user_id' not in st.session_state:
@@ -84,6 +123,8 @@ def participante_view():
                 if not provas_df.empty and 'data' in provas_df.columns:
                     provas_df['__data_dt'] = pd.to_datetime(provas_df['data'], errors='coerce')
                     provas = provas_df[provas_df['__data_dt'].apply(lambda x: str(x.year) == str(temporada) if pd.notna(x) else False)]
+                    if not provas.empty:
+                        provas = provas.sort_values(['__data_dt', 'id']).reset_index(drop=True)
                 else:
                     provas = pd.DataFrame()
             except Exception:
@@ -106,6 +147,20 @@ def participante_view():
 
             if user['status'] == "Ativo":
                 if len(provas) > 0 and len(pilotos_df) > 2:
+                    prova_ids_validos = set(provas['id'].tolist())
+                    proxima_prova_id = _get_proxima_prova_id(provas)
+                    temporada_default_aposta = st.session_state.get("aposta_default_temporada")
+                    prova_atual_sel = st.session_state.get("sel_prova_aposta")
+
+                    # Define o default somente no primeiro carregamento da temporada
+                    # ou quando a prova selecionada não existe mais na lista filtrada.
+                    if proxima_prova_id is not None:
+                        if temporada_default_aposta != temporada:
+                            st.session_state["sel_prova_aposta"] = proxima_prova_id
+                            st.session_state["aposta_default_temporada"] = temporada
+                        elif prova_atual_sel not in prova_ids_validos:
+                            st.session_state["sel_prova_aposta"] = proxima_prova_id
+
                     col_sel, col_btn, col_sem_ideias = st.columns([4, 1, 1])
                     with col_sel:
                         prova_id = st.selectbox(

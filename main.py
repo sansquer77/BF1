@@ -144,7 +144,7 @@ from ui.backup import main as backup_view
 from ui.dashboard import main as dashboard_view
 from ui.sobre import main as sobre_view
 from ui.hall_da_fama import hall_da_fama
-from services.auth_service import decode_token
+from services.auth_service import decode_token, clear_auth_cookies, get_auth_cookie_token
 
 # ============ ESTADO INICIAL DA SESSÃO ============
 if 'pagina' not in st.session_state:
@@ -217,10 +217,15 @@ def menu_participante():
 def get_payload():
     token = st.session_state.get('token')
     if not token:
+        token = get_auth_cookie_token()
+        if token:
+            st.session_state['token'] = token
+    if not token:
         st.session_state['pagina'] = "Login"
         st.stop()
     payload = decode_token(token)
     if not payload:
+        clear_auth_cookies()
         st.session_state['pagina'] = "Login"
         st.session_state['token'] = None
         st.stop()
@@ -253,6 +258,7 @@ INATIVO_ALLOWED_PAGES = {
 
 
 def _clear_session_and_redirect_login(msg: str):
+    clear_auth_cookies()
     for k in list(st.session_state.keys()):
         del st.session_state[k]
     st.session_state["pagina"] = "Login"
@@ -260,10 +266,23 @@ def _clear_session_and_redirect_login(msg: str):
     st.stop()
 
 
+def _ensure_token_from_cookie() -> bool:
+    """Restaura token de cookie para sessão, quando houver."""
+    token = st.session_state.get("token")
+    if token:
+        return True
+    cookie_token = get_auth_cookie_token()
+    if cookie_token:
+        st.session_state["token"] = cookie_token
+        return True
+    return False
+
+
 def _enforce_route_guard(pagina: str):
     if pagina in ("Login", "Logout"):
         return
 
+    _ensure_token_from_cookie()
     token = st.session_state.get("token")
     if not token:
         _clear_session_and_redirect_login("Sessão ausente. Faça login novamente.")
@@ -330,6 +349,7 @@ PAGES = {
 
 # ============ MENU LATERAL ============
 def sidebar_menu():
+    _ensure_token_from_cookie()
     token = st.session_state.get("token")
     if not token:
         menu_items = ["Login"]
@@ -352,6 +372,7 @@ def main():
     
     # LOGOUT
     if pagina == "Logout":
+        clear_auth_cookies()
         for k in list(st.session_state.keys()):
             del st.session_state[k]
         st.sidebar.success("Logout realizado com sucesso.")

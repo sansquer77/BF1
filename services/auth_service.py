@@ -17,7 +17,7 @@ from db.db_utils import db_connect, hash_password, check_password
 # Exportar explicitamente para manter compatibilidade
 __all__ = ['hash_password', 'check_password', 'autenticar_usuario', 'generate_token', 
            'decode_token', 'create_token', 'cadastrar_usuario', 'get_user_by_email',
-           'get_user_by_id', 'set_auth_cookies', 'clear_auth_cookies']
+           'get_user_by_id', 'set_auth_cookies', 'clear_auth_cookies', 'get_auth_cookie_token']
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,14 @@ class _FallbackCookieManager:
 
     def delete(self, key):
         st.session_state.pop(f"cookie_{key}", None)
+
+    def get_all(self):
+        # Keep API compatible with CookieManager.get_all().
+        return {
+            k.replace("cookie_", "", 1): v
+            for k, v in st.session_state.items()
+            if isinstance(k, str) and k.startswith("cookie_")
+        }
 
 
 def _get_cookie_manager():
@@ -194,6 +202,20 @@ def set_auth_cookies(token, expires_minutes=JWT_EXP_MINUTES):
 def clear_auth_cookies():
     cookie_manager = _get_cookie_manager()
     cookie_manager.delete("session_token")
+
+
+def get_auth_cookie_token():
+    """Retorna token de sessão salvo em cookie, quando disponível."""
+    cookie_manager = _get_cookie_manager()
+    try:
+        cookies = cookie_manager.get_all()
+        if isinstance(cookies, dict):
+            token = cookies.get("session_token")
+            if token:
+                return str(token)
+    except Exception:
+        return None
+    return None
 
 # --- RECUPERAÇÃO DE SENHA SEGURA ---
 import secrets
