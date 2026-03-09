@@ -321,18 +321,26 @@ def participante_view():
                         if mostrar:
                             col1, col2 = st.columns([3, 1])
                             with col1:
+                                key_piloto = f"piloto_aposta_{i}"
+                                if key_piloto not in st.session_state:
+                                    st.session_state[key_piloto] = (
+                                        pilotos_apostados_ant[i]
+                                        if len(pilotos_apostados_ant) > i and pilotos_apostados_ant[i] in pilotos
+                                        else "Nenhum"
+                                    )
                                 piloto_sel = st.selectbox(
                                     f"Piloto {i+1}",
                                     ["Nenhum"] + pilotos,
-                                    index=(pilotos.index(pilotos_apostados_ant[i]) + 1) if len(pilotos_apostados_ant) > i and pilotos_apostados_ant[i] in pilotos else 0,
-                                    key=f"piloto_aposta_{i}"
+                                    key=key_piloto
                                 )
                             with col2:
                                 if piloto_sel != "Nenhum":
+                                    key_fichas = f"fichas_aposta_{i}"
+                                    if key_fichas not in st.session_state:
+                                        st.session_state[key_fichas] = int(fichas_ant[i]) if len(fichas_ant) > i else 0
                                     valor_ficha = st.number_input(
                                         f"Fichas para {piloto_sel}", min_value=0, max_value=quantidade_fichas,
-                                        value=fichas_ant[i] if len(fichas_ant) > i else 0,
-                                        key=f"fichas_aposta_{i}"
+                                        key=key_fichas
                                     )
                                 else:
                                     valor_ficha = 0
