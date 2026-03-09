@@ -87,6 +87,36 @@ def _get_proxima_prova_id(provas_df: pd.DataFrame):
 
     return None
 
+
+def _ordenar_provas_por_calendario(provas_df: pd.DataFrame) -> pd.DataFrame:
+    """Ordena provas por data/hora do calendário (ascendente), com fallback estável."""
+    if provas_df.empty:
+        return provas_df
+
+    ordered = provas_df.copy()
+    tzinfo = now_sao_paulo().tzinfo
+
+    if 'data' in ordered.columns:
+        ordered['__data_dt'] = ordered['data'].apply(_parse_data_prova)
+        ordered['__evento_dt'] = ordered.apply(
+            lambda row: _parse_evento_prova_dt(
+                row.get('data'),
+                row.get('horario_prova', '00:00'),
+                tzinfo,
+            ),
+            axis=1,
+        )
+    else:
+        ordered['__data_dt'] = pd.NaT
+        ordered['__evento_dt'] = pd.NaT
+
+    ordered = ordered.sort_values(
+        by=['__evento_dt', '__data_dt', 'id'],
+        na_position='last'
+    ).reset_index(drop=True)
+
+    return ordered
+
 def participante_view():
     if 'token' not in st.session_state or 'user_id' not in st.session_state:
         st.warning("Você precisa estar logado para acessar essa página.")
@@ -156,18 +186,14 @@ def participante_view():
             provas_df = get_provas_df(temporada)
             try:
                 if not provas_df.empty and 'data' in provas_df.columns:
-                    provas_df['__data_dt'] = provas_df['data'].apply(_parse_data_prova)
-                    provas_df['__evento_dt'] = provas_df.apply(
-                        lambda row: _parse_evento_prova_dt(
-                            row.get('data'),
-                            row.get('horario_prova', '00:00'),
-                            now_sao_paulo().tzinfo,
-                        ),
-                        axis=1,
-                    )
-                    provas = provas_df[provas_df['__data_dt'].apply(lambda x: str(x.year) == str(temporada) if pd.notna(x) else False)]
+                    provas_ordenadas = _ordenar_provas_por_calendario(provas_df)
+                    provas = provas_ordenadas[
+                        provas_ordenadas['__data_dt'].apply(
+                            lambda x: str(x.year) == str(temporada) if pd.notna(x) else False
+                        )
+                    ]
                     if not provas.empty:
-                        provas = provas.sort_values(['__evento_dt', '__data_dt', 'id']).reset_index(drop=True)
+                        provas = provas.reset_index(drop=True)
                 else:
                     provas = pd.DataFrame()
             except Exception:

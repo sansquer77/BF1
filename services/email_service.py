@@ -83,6 +83,7 @@ def _gerar_previsao_fallback(nome_usuario: str, nome_prova: str, pilotos: list[s
 def enviar_email(destinatario: str, assunto: str, corpo_html: str, cco: Optional[list[str]] = None) -> bool:
     """Envia um e-mail HTML para o destinatário informado com opção de CCO."""
     if not EMAIL_REMETENTE or not SENHA_REMETENTE:
+        logger.error("Envio de email abortado: credenciais não configuradas (EMAIL_REMETENTE/SENHA).")
         st.error("Credenciais de e-mail não configuradas.")
         return False
 
@@ -93,6 +94,7 @@ def enviar_email(destinatario: str, assunto: str, corpo_html: str, cco: Optional
     destinatarios_envio.extend(cco)
 
     if not destinatarios_envio:
+        logger.error("Envio de email abortado: nenhum destinatário válido. destinatario=%s", destinatario)
         st.error("Nenhum destinatário válido para envio de e-mail.")
         return False
 
@@ -107,6 +109,7 @@ def enviar_email(destinatario: str, assunto: str, corpo_html: str, cco: Optional
             server.sendmail(EMAIL_REMETENTE, destinatarios_envio, msg.as_string())
         return True
     except Exception as e:
+        logger.exception("Erro SMTP ao enviar email para %s: %s", ", ".join(destinatarios_envio), e)
         st.error(f"Erro no envio para {', '.join(destinatarios_envio)}: {str(e)}")
         return False
 

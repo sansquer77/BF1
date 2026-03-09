@@ -804,6 +804,18 @@ def salvar_aposta(
                 return False
             conn.commit()
 
+            corpo_email = (
+                f"<p>Olá {html.escape(usuario['nome'])},</p>"
+                f"<p>Sua aposta para a prova <b>{html.escape(nome_prova_bd)}</b> foi registrada com sucesso.</p>"
+                "<p><b>Detalhes:</b></p>"
+                "<ul>"
+                f"<li>Pilotos: {html.escape(', '.join(pilotos))}</li>"
+                f"<li>Fichas: {html.escape(', '.join(map(str, fichas)))}</li>"
+                f"<li>Palpite para 11º colocado: {html.escape(piloto_11)}</li>"
+                "</ul>"
+                "<p>Boa sorte na prova!</p>"
+            )
+
             try:
                 contexto_ergast_email = _get_contexto_temporada_atual_ergast()
                 estimativa_email = _estimar_pontos_aposta_ergast(
@@ -875,7 +887,13 @@ def salvar_aposta(
                     "<p><small><b>Aviso de estimativa:</b> a probabilidade informada é apenas uma projeção estatística/opinativa com base em informações disponíveis e pode variar a qualquer momento. Não constitui garantia de resultado esportivo nem direito a pontuação, prevalecendo sempre as regras oficiais do bolão.</small></p>"
                     f"<p>{html.escape(fechamento_email)}</p>"
                 )
-                enviar_email(usuario['email'], f"Aposta registrada - {nome_prova_bd}", corpo_email)
+            except Exception as e:
+                logger.warning(f"Falha ao montar conteúdo avançado do email de aposta para {usuario.get('email')}: {e}")
+
+            try:
+                email_ok = enviar_email(usuario['email'], f"Aposta registrada - {nome_prova_bd}", corpo_email)
+                if not email_ok:
+                    logger.warning("Falha de envio de email de aposta para %s (prova_id=%s)", usuario.get('email'), prova_id)
             except Exception as e:
                 logger.warning(f"Falha ao enviar email de aposta para {usuario.get('email')}: {e}")
 
