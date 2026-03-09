@@ -180,6 +180,9 @@ def main():
 
     # Seletor de temporada para diagnósticos
     season_options = get_season_options()
+    if not season_options:
+        st.info("Não há temporadas disponíveis para consulta no seu histórico de status.")
+        return
     season = st.selectbox("Temporada", season_options, key="analysis_season")
     participantes_df = _get_participantes_temporada(season)
 

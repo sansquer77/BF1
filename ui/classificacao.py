@@ -168,6 +168,9 @@ def main():
 
     current_year = dt.datetime.now().year
     season_options = get_season_options(fallback_years=["2025", "2026"])
+    if not season_options:
+        st.info("Não há temporadas disponíveis para consulta no seu histórico de status.")
+        return
     default_index = get_default_season_index(season_options, current_year=str(current_year))
     
     season = st.selectbox("Temporada", season_options, index=default_index, key="classificacao_season")

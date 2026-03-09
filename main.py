@@ -108,7 +108,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============ INICIALIZAÇÃO DO BANCO ============
-from db.db_utils import init_db
+from db.db_utils import init_db, get_user_by_id, get_usuario_temporadas_ativas
 from db.migrations import run_migrations
 from db.master_user_manager import MasterUserManager
 
@@ -226,6 +226,85 @@ def get_payload():
         st.stop()
     return payload
 
+
+ROLE_GUARDS = {
+    "Gestão de Usuários": ("master",),
+    "Gestão de Regras": ("master",),
+    "Backup dos Bancos de Dados": ("master",),
+    "Gestão de Pilotos": ("admin", "master"),
+    "Gestão de Provas": ("admin", "master"),
+    "Gestão de Apostas": ("admin", "master"),
+    "Atualização de resultados": ("admin", "master"),
+    "Resultado Campeonato": ("admin", "master"),
+}
+
+INATIVO_ALLOWED_PAGES = {
+    "Painel do Participante",
+    "Calendário (" + str(datetime.datetime.now().year) + ")",
+    "Apostas Campeonato",
+    "Análise de Apostas",
+    "Log de Apostas",
+    "Classificação",
+    "Hall da Fama",
+    "Dashboard F1",
+    "Regulamento",
+    "Sobre",
+}
+
+
+def _clear_session_and_redirect_login(msg: str):
+    for k in list(st.session_state.keys()):
+        del st.session_state[k]
+    st.session_state["pagina"] = "Login"
+    st.warning(msg)
+    st.stop()
+
+
+def _enforce_route_guard(pagina: str):
+    if pagina in ("Login", "Logout"):
+        return
+
+    token = st.session_state.get("token")
+    if not token:
+        _clear_session_and_redirect_login("Sessão ausente. Faça login novamente.")
+
+    payload = decode_token(token)
+    if not payload:
+        _clear_session_and_redirect_login("Sessão expirada ou inválida. Faça login novamente.")
+
+    perfil = str(payload.get("perfil", "participante")).strip().lower()
+    user_id = payload.get("user_id")
+
+    if not user_id:
+        _clear_session_and_redirect_login("Sessão inválida. Faça login novamente.")
+
+    user = get_user_by_id(int(user_id))
+    if not user:
+        _clear_session_and_redirect_login("Usuário não encontrado. Faça login novamente.")
+
+    status_usuario = str(user.get("status", "")).strip().lower()
+
+    # Sincroniza sessão com claims assinadas do JWT a cada rota.
+    st.session_state["user_id"] = user_id
+    st.session_state["user_role"] = perfil
+    st.session_state["user_nome"] = payload.get("nome", st.session_state.get("user_nome"))
+    st.session_state["user_status"] = status_usuario
+
+    if status_usuario != "ativo":
+        st.session_state["allowed_seasons"] = get_usuario_temporadas_ativas(int(user_id))
+        if pagina not in INATIVO_ALLOWED_PAGES:
+            st.error("Usuário inativo possui acesso somente para consulta das temporadas em que esteve ativo.")
+            st.session_state["pagina"] = "Painel do Participante"
+            st.stop()
+    else:
+        st.session_state["allowed_seasons"] = []
+
+    allowed_roles = ROLE_GUARDS.get(pagina)
+    if allowed_roles and perfil not in allowed_roles:
+        st.error("Acesso negado: você não possui permissão para esta página.")
+        st.session_state["pagina"] = "Painel do Participante"
+        st.stop()
+
 # ============ DICIONÁRIO DE ROTAS ============
 PAGES = {
     "Login": login_view,
@@ -278,6 +357,8 @@ def main():
         st.sidebar.success("Logout realizado com sucesso.")
         st.rerun()
         return
+
+    _enforce_route_guard(pagina)
     
     # EXECUTA A VIEW
     if pagina in PAGES:

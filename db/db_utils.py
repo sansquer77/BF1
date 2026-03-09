@@ -322,6 +322,57 @@ def get_participantes_temporada_df(temporada: Optional[str] = None) -> pd.DataFr
         return pd.read_sql_query(query, conn, params=(season_end, season_start))
 
 
+def get_usuario_temporadas_ativas(user_id: int) -> list[str]:
+    """Retorna temporadas em que o usuário esteve com status ativo.
+
+    Usa histórico de status quando disponível. Sem histórico:
+    - usuário ativo: retorna temporadas existentes em `provas`
+    - usuário inativo: retorna lista vazia
+    """
+    with db_connect() as conn:
+        c = conn.cursor()
+
+        # Lista base de temporadas existentes em provas
+        temporadas_df = pd.read_sql_query(
+            """
+            SELECT DISTINCT COALESCE(NULLIF(TRIM(temporada), ''), SUBSTR(data, 1, 4)) AS temporada
+            FROM provas
+            WHERE COALESCE(NULLIF(TRIM(temporada), ''), SUBSTR(data, 1, 4)) IS NOT NULL
+            ORDER BY temporada
+            """,
+            conn,
+        )
+        temporadas_base = [str(t).strip() for t in temporadas_df.get("temporada", []).tolist() if str(t).strip()]
+        if not temporadas_base:
+            return []
+
+        if not _usuarios_status_historico_exists(conn):
+            c.execute("SELECT status FROM usuarios WHERE id = ?", (int(user_id),))
+            row = c.fetchone()
+            status = str(row[0]).strip().lower() if row and row[0] is not None else ""
+            return temporadas_base if status == "ativo" else []
+
+        temporadas_ativas_df = pd.read_sql_query(
+            """
+            SELECT DISTINCT s.temporada
+            FROM (
+                SELECT DISTINCT COALESCE(NULLIF(TRIM(temporada), ''), SUBSTR(data, 1, 4)) AS temporada
+                FROM provas
+            ) s
+            JOIN usuarios_status_historico h ON h.usuario_id = ?
+            WHERE LOWER(TRIM(COALESCE(h.status, ''))) = 'ativo'
+              AND DATETIME(h.inicio_em) <= DATETIME(s.temporada || '-12-31 23:59:59')
+              AND (h.fim_em IS NULL OR DATETIME(h.fim_em) >= DATETIME(s.temporada || '-01-01 00:00:00'))
+            ORDER BY s.temporada
+            """,
+            conn,
+            params=(int(user_id),),
+        )
+
+        temporadas_ativas = [str(t).strip() for t in temporadas_ativas_df.get("temporada", []).tolist() if str(t).strip()]
+        return temporadas_ativas
+
+
 def registrar_historico_status_usuario(
     usuario_id: int,
     novo_status: str,

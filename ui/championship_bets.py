@@ -32,6 +32,9 @@ def main():
 
     # Temporada selecionada
     temporadas = get_season_options()
+    if not temporadas:
+        st.info("Não há temporadas disponíveis para consulta no seu histórico de status.")
+        st.stop()
     temporada_sel = st.selectbox(
         "Temporada",
         temporadas,
