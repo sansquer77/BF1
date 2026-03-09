@@ -201,7 +201,19 @@ def set_auth_cookies(token, expires_minutes=JWT_EXP_MINUTES):
 
 def clear_auth_cookies():
     cookie_manager = _get_cookie_manager()
-    cookie_manager.delete("session_token")
+    try:
+        cookies = cookie_manager.get_all()
+        if isinstance(cookies, dict) and "session_token" not in cookies:
+            return
+    except Exception:
+        # If cookie listing fails, still attempt deletion below.
+        pass
+
+    try:
+        cookie_manager.delete("session_token")
+    except KeyError:
+        # extra_streamlit_components can raise KeyError when cookie is absent.
+        pass
 
 
 def get_auth_cookie_token():
