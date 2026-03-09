@@ -822,7 +822,7 @@ def salvar_aposta(
                     pilotos=pilotos,
                     fichas=fichas,
                     piloto_11=piloto_11,
-                    tipo_prova=tipo_prova,
+                    tipo_prova=tipo_prova_regra,
                     regras=regras,
                     contexto_ergast=contexto_ergast_email,
                 )
@@ -888,7 +888,7 @@ def salvar_aposta(
                     f"<p>{html.escape(fechamento_email)}</p>"
                 )
             except Exception as e:
-                logger.warning(f"Falha ao montar conteúdo avançado do email de aposta para {usuario.get('email')}: {e}")
+                logger.exception(f"Falha ao montar conteúdo avançado do email de aposta para {usuario.get('email')}: {e}")
 
             try:
                 email_ok = enviar_email(usuario['email'], f"Aposta registrada - {nome_prova_bd}", corpo_email)
