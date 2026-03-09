@@ -21,10 +21,18 @@ from db.db_utils import (
 from services.email_service import enviar_email, gerar_analise_aposta_com_probabilidade
 import html
 from services.rules_service import get_regras_aplicaveis
+from utils.data_utils import (
+    get_current_season,
+    get_driver_standings,
+    get_constructor_standings,
+    get_qualifying_vs_race_delta,
+    get_fastest_lap_times,
+)
 from utils.datetime_utils import SAO_PAULO_TZ, now_sao_paulo, parse_datetime_sao_paulo
 from utils.request_utils import get_client_ip
 
 logger = logging.getLogger(__name__)
+MAX_PERPLEXITY_CONTEXT_CHARS = 5200
 
 
 def _extrair_json_texto(raw_text: str) -> dict | None:
@@ -106,7 +114,6 @@ def _get_resumo_ultimas_apostas(usuario_id: int, apostas_df: pd.DataFrame, prova
         except Exception:
             fichas = []
         out.append({
-            'prova': str(provas_nome.get(row.get('prova_id'), row.get('nome_prova', ''))),
             'pilotos': [p.strip() for p in str(row.get('pilotos', '')).split(',') if p.strip()],
             'fichas': fichas,
             'piloto_11': str(row.get('piloto_11', '')).strip()
@@ -142,7 +149,236 @@ def _get_resumo_cenario_campeonato(resultados_df: pd.DataFrame, provas_df: pd.Da
     return out
 
 
-def _gerar_aposta_perplexity(pilotos_df: pd.DataFrame, regras: dict, nome_prova: str, tipo_prova: str, ultimas_apostas: list[dict], cenario: list[dict]) -> tuple[list[str], list[int], str] | None:
+def _get_contexto_temporada_atual_ergast() -> dict:
+    """Monta resumo normalizado e compacto da temporada atual com dados da Ergast."""
+    contexto = {
+        "src": "ergast",
+        "s": None,
+        "tp": [],
+        "tc": [],
+        "du": {"top": [], "bot": []},
+        "vr": [],
+    }
+
+    try:
+        temporada = str(get_current_season())
+    except Exception:
+        temporada = "current"
+
+    contexto["s"] = temporada
+
+    try:
+        df_pilotos = get_driver_standings(temporada)
+        if not df_pilotos.empty:
+            top_pilotos = []
+            for _, row in df_pilotos.head(5).iterrows():
+                top_pilotos.append(
+                    {
+                        "p": int(row.get("Position", 0) or 0),
+                        "n": str(row.get("Driver", "")).strip(),
+                        "e": str(row.get("Constructor", "")).strip(),
+                        "pt": int(row.get("Points", 0) or 0),
+                    }
+                )
+            contexto["tp"] = top_pilotos
+    except Exception:
+        pass
+
+    try:
+        df_construtores = get_constructor_standings(temporada)
+        if not df_construtores.empty:
+            top_construtores = []
+            for _, row in df_construtores.head(3).iterrows():
+                top_construtores.append(
+                    {
+                        "p": int(row.get("Position", 0) or 0),
+                        "n": str(row.get("Constructor", "")).strip(),
+                        "pt": int(row.get("Points", 0) or 0),
+                    }
+                )
+            contexto["tc"] = top_construtores
+    except Exception:
+        pass
+
+    try:
+        df_delta = get_qualifying_vs_race_delta(temporada)
+        if not df_delta.empty:
+            top_delta = []
+            bottom_delta = []
+            for _, row in df_delta.sort_values("Delta", ascending=False).head(3).iterrows():
+                top_delta.append(
+                    {
+                        "n": str(row.get("Driver", "")).strip(),
+                        "d": int(row.get("Delta", 0) or 0),
+                    }
+                )
+            for _, row in df_delta.sort_values("Delta", ascending=True).head(2).iterrows():
+                bottom_delta.append(
+                    {
+                        "n": str(row.get("Driver", "")).strip(),
+                        "d": int(row.get("Delta", 0) or 0),
+                    }
+                )
+            contexto["du"] = {"top": top_delta, "bot": bottom_delta}
+    except Exception:
+        pass
+
+    try:
+        df_volta_rapida = get_fastest_lap_times(temporada)
+        if not df_volta_rapida.empty:
+            voltas = []
+            for _, row in df_volta_rapida.head(3).iterrows():
+                voltas.append(
+                    {
+                        "n": str(row.get("Driver", "")).strip(),
+                        "t": str(row.get("Fastest Lap", "")).strip(),
+                    }
+                )
+            contexto["vr"] = voltas
+    except Exception:
+        pass
+
+    return contexto
+
+
+def _canonical_json(data: dict) -> str:
+    return json.dumps(data, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+
+def _build_compact_json_with_meta(payload_data: dict) -> tuple[str, str]:
+    """Retorna JSON compacto e metadata do tipo de fallback aplicado."""
+    compact = _canonical_json(payload_data)
+    if len(compact) <= MAX_PERPLEXITY_CONTEXT_CHARS:
+        return compact, "none"
+
+    reduced = _reduce_context_for_limit(payload_data)
+    compact_reduced = _canonical_json(reduced)
+    if len(compact_reduced) <= MAX_PERPLEXITY_CONTEXT_CHARS:
+        return compact_reduced, "reduced"
+
+    minimal = _minimal_context_for_limit(payload_data)
+    return _canonical_json(minimal), "minimal"
+
+
+def _reduce_context_for_limit(data: dict) -> dict:
+    """Fallback progressivo para manter contexto útil abaixo do limite de tamanho."""
+    d = dict(data)
+
+    # 1) Remove voltas rápidas (sinal útil, mas menos crítico para aposta)
+    erg = dict(d.get("erg", {}))
+    if "vr" in erg:
+        erg = dict(erg)
+        erg["vr"] = []
+        d["erg"] = erg
+
+    # 2) Enxuga histórico local e cenário
+    if "ua" in d:
+        d["ua"] = d.get("ua", [])[:1]
+    if "cz" in d:
+        d["cz"] = d.get("cz", [])[:1]
+
+    # 3) Enxuga ainda mais Ergast
+    erg2 = dict(d.get("erg", {}))
+    if "tp" in erg2:
+        erg2["tp"] = erg2.get("tp", [])[:3]
+    if "tc" in erg2:
+        erg2["tc"] = erg2.get("tc", [])[:2]
+    du = dict(erg2.get("du", {}))
+    if du:
+        du["top"] = du.get("top", [])[:2]
+        du["bot"] = du.get("bot", [])[:1]
+        erg2["du"] = du
+    d["erg"] = erg2
+
+    return d
+
+
+def _minimal_context_for_limit(data: dict) -> dict:
+    """Fallback mínimo que preserva JSON válido e os campos essenciais para decisão."""
+    erg = dict(data.get("erg", {}))
+    du = dict(erg.get("du", {}))
+    return {
+        "v": data.get("v", 1),
+        "alvo": data.get("alvo", {}),
+        "pd": data.get("pd", []),
+        "rg": data.get("rg", {}),
+        "ua": data.get("ua", [])[:1],
+        "cz": data.get("cz", [])[:1],
+        "erg": {
+            "src": erg.get("src", "ergast"),
+            "s": erg.get("s"),
+            "tp": erg.get("tp", [])[:3],
+            "tc": erg.get("tc", [])[:2],
+            "du": {
+                "top": du.get("top", [])[:2],
+                "bot": du.get("bot", [])[:1],
+            },
+            "vr": [],
+        },
+    }
+
+
+def _build_compact_prompt_payload(
+    nome_prova: str,
+    tipo_prova: str,
+    pilotos_disponiveis: list[str],
+    min_pilotos: int,
+    qtd_fichas: int,
+    fichas_max: int,
+    permite_mesma_equipe: bool,
+    ultimas_apostas: list[dict],
+    cenario: list[dict],
+    contexto_ergast: dict,
+) -> tuple[str, str]:
+    payload_data = {
+        "v": 1,
+        "alvo": {"nome": nome_prova, "tipo": tipo_prova},
+        "pd": pilotos_disponiveis,
+        "rg": {
+            "min": min_pilotos,
+            "qf": qtd_fichas,
+            "fmax": fichas_max,
+            "me": permite_mesma_equipe,
+        },
+        "ua": ultimas_apostas,
+        "cz": cenario,
+        "erg": contexto_ergast,
+    }
+
+    return _build_compact_json_with_meta(payload_data)
+
+
+def _validar_formato_json_resposta(parsed: dict) -> bool:
+    """Valida formato exigido: {"pilotos": [...], "fichas": [...], "piloto_11": "..."}."""
+    if not isinstance(parsed, dict):
+        return False
+    expected = {"pilotos", "fichas", "piloto_11"}
+    if set(parsed.keys()) != expected:
+        return False
+    pilotos = parsed.get("pilotos")
+    fichas = parsed.get("fichas")
+    piloto_11 = parsed.get("piloto_11")
+    if not isinstance(pilotos, list) or not isinstance(fichas, list) or not isinstance(piloto_11, str):
+        return False
+    if len(pilotos) == 0 or len(fichas) == 0 or len(pilotos) != len(fichas):
+        return False
+    try:
+        _ = [str(p).strip() for p in pilotos]
+        _ = [int(x) for x in fichas]
+    except Exception:
+        return False
+    return piloto_11.strip() != ""
+
+
+def _gerar_aposta_perplexity(
+    pilotos_df: pd.DataFrame,
+    regras: dict,
+    nome_prova: str,
+    tipo_prova: str,
+    ultimas_apostas: list[dict],
+    cenario: list[dict],
+    contexto_ergast: dict,
+) -> tuple[list[str], list[int], str] | None:
     api_key = ""
     model = "sonar"
     try:
@@ -160,25 +396,48 @@ def _gerar_aposta_perplexity(pilotos_df: pd.DataFrame, regras: dict, nome_prova:
     fichas_max = int(regras.get('fichas_por_piloto', qtd_fichas))
     permite_mesma_equipe = bool(regras.get('mesma_equipe', False))
 
+    contexto_compacto_json, context_fallback_mode = _build_compact_prompt_payload(
+        nome_prova=nome_prova,
+        tipo_prova=tipo_prova,
+        pilotos_disponiveis=pilotos_disponiveis,
+        min_pilotos=min_pilotos,
+        qtd_fichas=qtd_fichas,
+        fichas_max=fichas_max,
+        permite_mesma_equipe=permite_mesma_equipe,
+        ultimas_apostas=ultimas_apostas,
+        cenario=cenario,
+        contexto_ergast=contexto_ergast,
+    )
+    logger.debug(
+        "Perplexity payload context size=%d fallback=%s limit=%d",
+        len(contexto_compacto_json),
+        context_fallback_mode,
+        MAX_PERPLEXITY_CONTEXT_CHARS,
+    )
+
     system_prompt = (
         "Você é um assistente de estratégia de bolão de F1. "
         "Responda apenas JSON válido, sem markdown. "
         "Não invente pilotos fora da lista disponível. "
-        "Se houver incerteza, faça uma aposta conservadora e viável."
+        "Se houver incerteza, faça uma aposta conservadora e viável. "
+        "Use criatividade controlada: varie escolhas e distribuição entre chamadas quando houver alternativas plausíveis, "
+        "mas evite sugestões irreais. "
+        "Priorize pilotos de melhor desempenho recente/classificação e só assuma risco moderado. "
+        "Evite concentrar muitas fichas em pilotos de baixo desempenho. "
+        "Legenda das chaves do JSON de entrada: "
+        "alvo={nome,tipo}, pd=pilotos_disponiveis, rg={min,qf,fmax,me}, ua=ultimas_apostas, cz=cenario_local, "
+        "erg={src,s,tp,tc,du,vr}, tp={p,n,e,pt}, tc={p,n,pt}, du={top,bot}."
     )
     user_prompt = (
-        f"Prova alvo: {nome_prova} ({tipo_prova}).\n"
-        f"Pilotos disponíveis: {pilotos_disponiveis}\n"
-        f"Regras: min_pilotos={min_pilotos}, quantidade_fichas={qtd_fichas}, fichas_por_piloto={fichas_max}, mesma_equipe={permite_mesma_equipe}.\n"
-        f"Últimas 3 apostas do participante: {ultimas_apostas}\n"
-        f"Cenário recente do campeonato (últimas provas): {cenario}\n"
+        "Dados de entrada (JSON canônico compacto):\n"
+        f"{contexto_compacto_json}\n"
         "Gere uma aposta viável com este formato JSON EXATO: "
         "{\"pilotos\": [\"Nome\"], \"fichas\": [1,2], \"piloto_11\": \"Nome\"}."
     )
 
     payload = {
         "model": model,
-        "temperature": 0.2,
+        "temperature": 0.35,
         "max_tokens": 260,
         "messages": [
             {"role": "system", "content": system_prompt},
@@ -198,6 +457,8 @@ def _gerar_aposta_perplexity(pilotos_df: pd.DataFrame, regras: dict, nome_prova:
         content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
         parsed = _extrair_json_texto(content)
         if not parsed:
+            return None
+        if not _validar_formato_json_resposta(parsed):
             return None
         pilotos = [str(p).strip() for p in parsed.get('pilotos', []) if str(p).strip()]
         fichas = [int(x) for x in parsed.get('fichas', [])]
@@ -771,11 +1032,20 @@ def gerar_aposta_sem_ideias(usuario_id, prova_id, nome_prova, temporada=None):
 
     apostas_df = get_apostas_df(temporada)
     resultados_df = get_resultados_df(temporada)
-    ultimas_apostas = _get_resumo_ultimas_apostas(usuario_id, apostas_df, provas_df, limite=3)
-    cenario = _get_resumo_cenario_campeonato(resultados_df, provas_df, limite=3)
+    ultimas_apostas = _get_resumo_ultimas_apostas(usuario_id, apostas_df, provas_df, limite=2)
+    cenario = _get_resumo_cenario_campeonato(resultados_df, provas_df, limite=2)
+    contexto_ergast = _get_contexto_temporada_atual_ergast()
 
     origem = "aleatória"
-    sugestao = _gerar_aposta_perplexity(pilotos_df, regras, nome_prova, tipo_prova, ultimas_apostas, cenario)
+    sugestao = _gerar_aposta_perplexity(
+        pilotos_df,
+        regras,
+        nome_prova,
+        tipo_prova,
+        ultimas_apostas,
+        cenario,
+        contexto_ergast,
+    )
     if sugestao:
         pilotos_sel, fichas_sel, piloto_11_sel = sugestao
         if _aposta_valida_regras(pilotos_sel, fichas_sel, piloto_11_sel, pilotos_df, regras):
