@@ -6,7 +6,7 @@ Versão 3.0 com melhoramentos de segurança
 
 import os
 import logging
-from typing import Optional, Dict
+from typing import Optional
 import streamlit as st
 from db.connection_pool import get_pool
 from db.db_utils import hash_password, get_user_by_email
@@ -35,7 +35,7 @@ class MasterUserManager:
         return None
     
     @staticmethod
-    def _get_credentials() -> Optional[Dict[str, str]]:
+    def _get_credentials() -> Optional[dict[str, str]]:
         """
         Obtém credenciais do Master a partir de variáveis de ambiente
         

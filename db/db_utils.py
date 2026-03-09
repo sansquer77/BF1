@@ -10,7 +10,7 @@ import bcrypt
 import logging
 import os
 from functools import lru_cache
-from typing import Optional, Dict
+from typing import Optional
 from db.connection_pool import get_pool, init_pool
 from db.db_config import BCRYPT_ROUNDS, DB_PATH
 
@@ -202,7 +202,7 @@ def _get_existing_columns(table: str, preferred: Optional[list[str]] = None) -> 
     return cols
 
 
-def get_user_by_email(email: str) -> Optional[Dict]:
+def get_user_by_email(email: str) -> Optional[dict]:
     """
     Retorna usuário pelo email
     
@@ -222,7 +222,7 @@ def get_user_by_email(email: str) -> Optional[Dict]:
             return dict(row)
         return None
 
-def get_master_user() -> Optional[Dict]:
+def get_master_user() -> Optional[dict]:
     """Retorna o usuário Master se existir"""
     return get_user_by_email('master@sistema.local')
 
@@ -245,7 +245,7 @@ def autenticar_usuario(email: str, senha: str) -> dict:
         return usuario
     return {}
 
-def get_user_by_id(user_id: int) -> Optional[Dict]:
+def get_user_by_id(user_id: int) -> Optional[dict]:
     """
     Retorna usuário pelo ID
     

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Iterable
+from typing import Iterable, Optional
 
 from db.backup_utils import list_temporadas
 
@@ -18,10 +18,10 @@ def get_current_year_str() -> str:
 
 
 def get_season_options(
-    fallback_years: list[str] | None = None,
+    fallback_years: Optional[list[str]] = None,
     include_current_year: bool = True,
     descending: bool = False,
-    ensure_values: list[str] | None = None,
+    ensure_values: Optional[list[str]] = None,
 ) -> list[str]:
     seasons = _normalize_season_values(list_temporadas() or [])
 
@@ -43,7 +43,7 @@ def get_season_options(
     return seasons
 
 
-def get_default_season_index(options: list[str], current_year: str | None = None) -> int:
+def get_default_season_index(options: list[str], current_year: Optional[str] = None) -> int:
     if not options:
         return 0
     year = current_year or get_current_year_str()

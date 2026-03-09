@@ -168,7 +168,7 @@ def gerar_previsao_sarcastica(nome_usuario: str, nome_prova: str, pilotos: list[
         return _gerar_previsao_fallback(nome_usuario, nome_prova, pilotos, fichas, piloto_11)
 
 
-def _extrair_json_texto(raw_text: str) -> dict | None:
+def _extrair_json_texto(raw_text: str) -> Optional[dict]:
     if not raw_text:
         return None
     txt = raw_text.strip()

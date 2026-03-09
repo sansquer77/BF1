@@ -4,9 +4,10 @@ import logging
 import os
 import json
 import ast
-import httpx
+import importlib
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from typing import Optional, Union, cast
 from db.db_utils import (
     get_user_by_id,
     get_horario_prova,
@@ -34,8 +35,13 @@ from utils.request_utils import get_client_ip
 logger = logging.getLogger(__name__)
 MAX_PERPLEXITY_CONTEXT_CHARS = 5200
 
+try:
+    httpx = importlib.import_module("httpx")
+except ImportError:
+    httpx = None
 
-def _extrair_json_texto(raw_text: str) -> dict | None:
+
+def _extrair_json_texto(raw_text: str) -> Optional[dict]:
     if not raw_text:
         return None
     txt = raw_text.strip()
@@ -82,7 +88,10 @@ def _aposta_valida_regras(pilotos_sel: list[str], fichas_sel: list[int], piloto_
         return False
 
     if not permite_mesma_equipe and not pilotos_df.empty and 'equipe' in pilotos_df.columns:
-        mapa_eq = dict(zip(pilotos_df['nome'].astype(str), pilotos_df['equipe'].astype(str)))
+        mapa_eq: dict[str, str] = {
+            str(nome): str(eq)
+            for nome, eq in zip(pilotos_df['nome'].astype(str), pilotos_df['equipe'].astype(str))
+        }
         equipes = [mapa_eq.get(str(p), '') for p in pilotos_sel]
         equipes_validas = [e for e in equipes if e]
         if len(set(equipes_validas)) < len(equipes_validas):
@@ -91,21 +100,17 @@ def _aposta_valida_regras(pilotos_sel: list[str], fichas_sel: list[int], piloto_
     return True
 
 
-def _get_resumo_ultimas_apostas(usuario_id: int, apostas_df: pd.DataFrame, provas_df: pd.DataFrame, limite: int = 3) -> list[dict]:
+def _get_resumo_ultimas_apostas(usuario_id: int, apostas_df: pd.DataFrame, limite: int = 3) -> list[dict]:
     if apostas_df.empty:
         return []
-    ap = apostas_df[apostas_df['usuario_id'] == usuario_id].copy()
+    ap = cast(pd.DataFrame, apostas_df[apostas_df['usuario_id'] == usuario_id].copy())
     if ap.empty:
         return []
     if 'data_envio' in ap.columns:
         ap['__envio'] = pd.to_datetime(ap['data_envio'], errors='coerce')
-        ap = ap.sort_values('__envio')
+        ap = ap.sort_values(by=['__envio'])
     ap = ap.drop_duplicates(subset=['prova_id'], keep='last')
-    ap = ap.sort_values('prova_id', ascending=False).head(limite)
-
-    provas_nome = {}
-    if not provas_df.empty and 'id' in provas_df.columns and 'nome' in provas_df.columns:
-        provas_nome = dict(zip(provas_df['id'], provas_df['nome']))
+    ap = ap.sort_values(by=['prova_id'], ascending=False).head(limite)
 
     out = []
     for _, row in ap.iterrows():
@@ -124,9 +129,9 @@ def _get_resumo_ultimas_apostas(usuario_id: int, apostas_df: pd.DataFrame, prova
 def _get_resumo_cenario_campeonato(resultados_df: pd.DataFrame, provas_df: pd.DataFrame, limite: int = 3) -> list[dict]:
     if resultados_df.empty:
         return []
-    res = resultados_df.copy()
+    res = cast(pd.DataFrame, resultados_df.copy())
     if 'prova_id' in res.columns:
-        res = res.sort_values('prova_id', ascending=False).head(limite)
+        res = res.sort_values(by=['prova_id'], ascending=False).head(limite)
 
     provas_nome = {}
     if not provas_df.empty and 'id' in provas_df.columns and 'nome' in provas_df.columns:
@@ -378,7 +383,10 @@ def _gerar_aposta_perplexity(
     ultimas_apostas: list[dict],
     cenario: list[dict],
     contexto_ergast: dict,
-) -> tuple[list[str], list[int], str] | None:
+) -> Optional[tuple[list[str], list[int], str]]:
+    if httpx is None:
+        return None
+
     api_key = ""
     model = "sonar"
     try:
@@ -390,7 +398,7 @@ def _gerar_aposta_perplexity(
     if not api_key:
         return None
 
-    pilotos_disponiveis = pilotos_df['nome'].astype(str).tolist() if not pilotos_df.empty else []
+    pilotos_disponiveis: list[str] = [str(x) for x in pilotos_df['nome'].tolist()] if not pilotos_df.empty else []
     min_pilotos = int(regras.get('qtd_minima_pilotos') or regras.get('min_pilotos', 3))
     qtd_fichas = int(regras.get('quantidade_fichas', 15))
     fichas_max = int(regras.get('fichas_por_piloto', qtd_fichas))
@@ -498,7 +506,7 @@ def pode_fazer_aposta(data_prova_str, horario_prova_str, horario_usuario=None):
 
 def salvar_aposta(
     usuario_id, prova_id, pilotos, fichas, piloto_11, nome_prova,
-    automatica=0, horario_forcado=None, temporada: str | None = None, show_errors=True,
+    automatica=0, horario_forcado=None, temporada: Optional[str] = None, show_errors=True,
     permitir_salvar_tardia: bool = False
 ):
     try:
@@ -701,7 +709,7 @@ def salvar_aposta(
 def gerar_aposta_aleatoria(pilotos_df):
     import random
     if not pilotos_df.empty and 'status' in pilotos_df.columns:
-        pilotos_df = pilotos_df[pilotos_df['status'] == 'Ativo']
+        pilotos_df = cast(pd.DataFrame, pilotos_df[pilotos_df['status'] == 'Ativo'])
     equipes_unicas = [e for e in pilotos_df['equipe'].unique().tolist() if e]
     if len(equipes_unicas) < 3 or pilotos_df.empty:
         return [], [], None
@@ -740,7 +748,7 @@ def gerar_aposta_aleatoria_com_regras(pilotos_df, regras: dict):
     import random
     import math
     if not pilotos_df.empty and 'status' in pilotos_df.columns:
-        pilotos_df = pilotos_df[pilotos_df['status'] == 'Ativo']
+        pilotos_df = cast(pd.DataFrame, pilotos_df[pilotos_df['status'] == 'Ativo'])
     if pilotos_df.empty:
         return [], [], None
     equipes_unicas = [e for e in pilotos_df['equipe'].unique().tolist() if e]
@@ -872,7 +880,7 @@ def ajustar_aposta_para_regras(pilotos: list[str], fichas: list[int], regras: di
         return [], []
     return pilotos, fichas
 
-def _determinar_tipo_prova(prova_row: pd.Series | dict, nome_prova: str | None) -> str:
+def _determinar_tipo_prova(prova_row: Union[pd.Series, dict], nome_prova: Optional[str]) -> str:
     try:
         if isinstance(prova_row, dict):
             t = prova_row.get('tipo')
@@ -964,7 +972,7 @@ def gerar_aposta_automatica(usuario_id, prova_id, nome_prova, apostas_df, provas
     
     pilotos_df = get_pilotos_df()
     if not pilotos_df.empty and 'status' in pilotos_df.columns:
-        pilotos_df = pilotos_df[pilotos_df['status'] == 'Ativo']
+        pilotos_df = cast(pd.DataFrame, pilotos_df[pilotos_df['status'] == 'Ativo'])
 
     if not ap_ant.empty:
         ap_ant = ap_ant.iloc[0]
@@ -1026,13 +1034,13 @@ def gerar_aposta_sem_ideias(usuario_id, prova_id, nome_prova, temporada=None):
 
     pilotos_df = get_pilotos_df()
     if not pilotos_df.empty and 'status' in pilotos_df.columns:
-        pilotos_df = pilotos_df[pilotos_df['status'] == 'Ativo']
+        pilotos_df = cast(pd.DataFrame, pilotos_df[pilotos_df['status'] == 'Ativo'])
     if pilotos_df.empty:
         return False, "Não há pilotos ativos para gerar aposta."
 
     apostas_df = get_apostas_df(temporada)
     resultados_df = get_resultados_df(temporada)
-    ultimas_apostas = _get_resumo_ultimas_apostas(usuario_id, apostas_df, provas_df, limite=2)
+    ultimas_apostas = _get_resumo_ultimas_apostas(usuario_id, apostas_df, limite=2)
     cenario = _get_resumo_cenario_campeonato(resultados_df, provas_df, limite=2)
     contexto_ergast = _get_contexto_temporada_atual_ergast()
 
@@ -1252,12 +1260,12 @@ def salvar_classificacao_prova(p_id, df_c, temp=None):
                 )
         conn.commit()
 
-def atualizar_classificacoes_todas_as_provas(temporada: str | None = None):
+def atualizar_classificacoes_todas_as_provas(temporada: Optional[str] = None):
     with db_connect() as conn:
-        usrs = pd.read_sql('SELECT id FROM usuarios WHERE status = "Ativo"', conn)
-        provs = pd.read_sql('SELECT id, nome, data, tipo, temporada FROM provas', conn)
-        apts = pd.read_sql('SELECT usuario_id, prova_id, data_envio, pilotos, fichas, piloto_11, automatica, temporada FROM apostas', conn)
-        ress = pd.read_sql('SELECT prova_id, posicoes, abandono_pilotos FROM resultados', conn)
+        usrs = cast(pd.DataFrame, pd.read_sql('SELECT id FROM usuarios WHERE status = "Ativo"', conn))
+        provs = cast(pd.DataFrame, pd.read_sql('SELECT id, nome, data, tipo, temporada FROM provas', conn))
+        apts = cast(pd.DataFrame, pd.read_sql('SELECT usuario_id, prova_id, data_envio, pilotos, fichas, piloto_11, automatica, temporada FROM apostas', conn))
+        ress = cast(pd.DataFrame, pd.read_sql('SELECT prova_id, posicoes, abandono_pilotos FROM resultados', conn))
         
         import ast
         # Se temporada for fornecida, processa apenas provas dessa temporada
@@ -1271,13 +1279,14 @@ def atualizar_classificacoes_todas_as_provas(temporada: str | None = None):
                 provs_dt = provs.copy()
                 provs_dt['__data_dt'] = pd.to_datetime(provs_dt['data'], errors='coerce')
                 for temp_val, grp in provs_dt.groupby('temporada'):
-                    grp = grp.sort_values('__data_dt')
+                    grp = cast(pd.DataFrame, grp)
+                    grp = grp.sort_values(by=['__data_dt'])
                     if not grp.empty:
                         primeira_prova_por_temp[str(temp_val)] = int(grp.iloc[0]['id'])
             elif 'data' in provs.columns:
-                provs_dt = provs.copy()
+                provs_dt = cast(pd.DataFrame, provs.copy())
                 provs_dt['__data_dt'] = pd.to_datetime(provs_dt['data'], errors='coerce')
-                provs_dt = provs_dt.sort_values('__data_dt')
+                provs_dt = provs_dt.sort_values(by=['__data_dt'])
                 if not provs_dt.empty:
                     primeira_prova_por_temp[str(datetime.now().year)] = int(provs_dt.iloc[0]['id'])
             elif not provs.empty:

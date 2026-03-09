@@ -1,7 +1,8 @@
 import streamlit as st
+from typing import Optional
 
 
-def get_client_ip() -> str | None:
+def get_client_ip() -> Optional[str]:
     """Retorna o IP do cliente quando disponível no contexto da requisição.
 
     Em ambientes com proxy (ex.: Heroku), prioriza o primeiro IP de X-Forwarded-For.

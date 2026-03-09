@@ -1,9 +1,14 @@
 import jwt
 from datetime import datetime, timedelta, timezone
 import streamlit as st
-import extra_streamlit_components as stx
 import os
 import logging
+import importlib
+
+try:
+    stx = importlib.import_module("extra_streamlit_components")
+except ImportError:
+    stx = None
 
 # Funções de hash/check de senha - importadas de db_utils para evitar duplicação
 # Re-exportadas aqui para manter compatibilidade com módulos que importam de auth_service
@@ -15,6 +20,22 @@ __all__ = ['hash_password', 'check_password', 'autenticar_usuario', 'generate_to
            'get_user_by_id', 'set_auth_cookies', 'clear_auth_cookies']
 
 logger = logging.getLogger(__name__)
+
+
+class _FallbackCookieManager:
+    """Fallback simples quando extra_streamlit_components não está instalado."""
+
+    def set(self, key, value, expires_at=None, options=None):
+        st.session_state[f"cookie_{key}"] = value
+
+    def delete(self, key):
+        st.session_state.pop(f"cookie_{key}", None)
+
+
+def _get_cookie_manager():
+    if stx is not None:
+        return stx.CookieManager()
+    return _FallbackCookieManager()
 
 # ============ CONFIGURAÇÃO JWT ============
 # JWT_SECRET DEVE ser configurado via st.secrets ou variável de ambiente
@@ -111,13 +132,14 @@ def cadastrar_usuario(nome: str, email: str, senha: str, perfil="participante", 
             user_id = c.lastrowid
             conn.commit()
         try:
-            from db.db_utils import registrar_historico_status_usuario
-            registrar_historico_status_usuario(
-                user_id,
-                status,
-                alterado_por=None,
-                motivo="cadastrar_usuario"
-            )
+            if isinstance(user_id, int):
+                from db.db_utils import registrar_historico_status_usuario
+                registrar_historico_status_usuario(
+                    user_id,
+                    status,
+                    alterado_por=None,
+                    motivo="cadastrar_usuario"
+                )
         except Exception:
             pass
         return True
@@ -148,7 +170,7 @@ def get_user_by_id(user_id):
 # --- GESTÃO DE COOKIES (para login) ---
 def set_auth_cookies(token, expires_minutes=JWT_EXP_MINUTES):
     """Salva o token JWT em cookie para restaurar a sessão."""
-    cookie_manager = stx.CookieManager()
+    cookie_manager = _get_cookie_manager()
     expires_at = datetime.now() + timedelta(minutes=expires_minutes)
     try:
         cookie_manager.set(
@@ -170,7 +192,7 @@ def set_auth_cookies(token, expires_minutes=JWT_EXP_MINUTES):
         )
 
 def clear_auth_cookies():
-    cookie_manager = stx.CookieManager()
+    cookie_manager = _get_cookie_manager()
     cookie_manager.delete("session_token")
 
 # --- RECUPERAÇÃO DE SENHA SEGURA ---
