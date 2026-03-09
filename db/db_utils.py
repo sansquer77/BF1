@@ -449,6 +449,7 @@ def registrar_log_aposta(*args, **kwargs):
         tipo_aposta = kwargs.get('tipo_aposta')
         automatica = kwargs.get('automatica')
         horario = kwargs.get('horario')
+        ip_address = kwargs.get('ip_address')
         temporada = kwargs.get('temporada', str(datetime.datetime.now().year))
         status = kwargs.get('status', 'Registrada')
         usuario_id = kwargs.get('usuario_id')
@@ -483,6 +484,7 @@ def registrar_log_aposta(*args, **kwargs):
                     automatica INTEGER,
                     data TEXT,
                     horario TIMESTAMP,
+                    ip_address TEXT,
                     temporada TEXT DEFAULT '{datetime.datetime.now().year}',
                     status TEXT DEFAULT 'Registrada',
                     data_criacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -501,6 +503,9 @@ def registrar_log_aposta(*args, **kwargs):
                 apostador, aposta, nome_prova, pilotos, piloto_11,
                 tipo_aposta, automatica, data_str, horario_str
             ]
+            if 'ip_address' in cols:
+                insert_cols.append('ip_address')
+                insert_vals.append(ip_address)
             if 'usuario_id' in cols:
                 insert_cols.insert(0, 'usuario_id')
                 insert_vals.insert(0, usuario_id)

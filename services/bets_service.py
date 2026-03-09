@@ -22,6 +22,7 @@ from services.email_service import enviar_email, gerar_analise_aposta_com_probab
 import html
 from services.rules_service import get_regras_aplicaveis
 from utils.datetime_utils import SAO_PAULO_TZ, now_sao_paulo, parse_datetime_sao_paulo
+from utils.request_utils import get_client_ip
 
 logger = logging.getLogger(__name__)
 
@@ -283,6 +284,7 @@ def salvar_aposta(
 
     dados_pilotos = ', '.join(pilotos)
     dados_fichas = ', '.join(map(str, fichas))
+    ip_apostador = get_client_ip()
 
     usuario = get_user_by_id(usuario_id)
     if not usuario:
@@ -365,6 +367,7 @@ def salvar_aposta(
                         tipo_aposta=tipo_aposta,
                         automatica=automatica,
                         horario=agora_sp,
+                        ip_address=ip_apostador,
                         temporada=temporada,
                         status='Rejeitada'
                     )
@@ -428,6 +431,7 @@ def salvar_aposta(
         tipo_aposta=tipo_aposta,
         automatica=automatica,
         horario=agora_sp,
+        ip_address=ip_apostador,
         temporada=temporada,
         status='Registrada'
     )
@@ -632,9 +636,6 @@ def gerar_aposta_automatica(usuario_id, prova_id, nome_prova, apostas_df, provas
     if prova_atual.empty:
         return False, "Prova não encontrada."
         
-    data_prova = prova_atual['data'].iloc[0]
-    horario_prova = prova_atual['horario_prova'].iloc[0]
-    horario_limite = _parse_datetime_sp(data_prova, horario_prova)
     tipo_prova = _determinar_tipo_prova(prova_atual.iloc[0], nome_prova)
     regras = get_regras_aplicaveis(str(temporada or datetime.now().year), tipo_prova)
     
@@ -733,7 +734,7 @@ def gerar_aposta_automatica(usuario_id, prova_id, nome_prova, apostas_df, provas
         
     sucesso = salvar_aposta(
         usuario_id, prova_id, pilotos_ant, fichas_ant, piloto_11_ant, nome_prova,
-        automatica=nova_auto, horario_forcado=horario_limite, temporada=temporada, show_errors=False,
+        automatica=nova_auto, temporada=temporada, show_errors=False,
         permitir_salvar_tardia=True
     )
     

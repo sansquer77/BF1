@@ -12,13 +12,20 @@ logger = logging.getLogger(__name__)
 def carregar_logs(temporada=None):
     """Carrega logs de apostas, opcionalmente filtrando por temporada"""
     with db_connect() as conn:
+        cols_info = pd.read_sql("PRAGMA table_info(log_apostas)", conn)
+        has_status = "status" in cols_info["name"].values if not cols_info.empty else False
+        has_ip_address = "ip_address" in cols_info["name"].values if not cols_info.empty else False
+        status_expr = "status" if has_status else "'Registrada' AS status"
+        ip_expr = "ip_address" if has_ip_address else "NULL AS ip_address"
+
         if temporada:
-            query = '''SELECT id, data, horario, apostador, nome_prova, pilotos, aposta, piloto_11, tipo_aposta, automatica, temporada FROM log_apostas 
+            query = f'''SELECT id, data, horario, apostador, nome_prova, pilotos, aposta, piloto_11, tipo_aposta, automatica, {ip_expr}, temporada, {status_expr} FROM log_apostas 
                        WHERE (temporada = ? OR temporada IS NULL)
                        ORDER BY id DESC'''
             df = pd.read_sql(query, conn, params=(temporada,))
         else:
-            df = pd.read_sql('SELECT id, data, horario, apostador, nome_prova, pilotos, aposta, piloto_11, tipo_aposta, automatica, temporada FROM log_apostas ORDER BY id DESC', conn)
+            query = f"SELECT id, data, horario, apostador, nome_prova, pilotos, aposta, piloto_11, tipo_aposta, automatica, {ip_expr}, temporada, {status_expr} FROM log_apostas ORDER BY id DESC"
+            df = pd.read_sql(query, conn)
     return df
 
 def get_nome_from_cookie():
@@ -65,7 +72,7 @@ def main():
     colunas_filtro = []
     if perfil in ("admin", "master"):
         colunas_filtro.append("apostador")
-    cols = st.columns(3)
+    cols = st.columns(4)
     idx_filtro = 0
 
     if "apostador" in colunas_filtro:
@@ -81,6 +88,11 @@ def main():
     idx_filtro += 1
     data_sel = cols[idx_filtro].selectbox(
         "Data", ["Todas"] + sorted(df["data"].unique(), reverse=True)
+    )
+    idx_filtro += 1
+
+    status_sel = cols[idx_filtro].selectbox(
+        "Status", ["Todos"] + sorted(df["status"].fillna("Registrada").unique().tolist())
     )
 
     mostrar_automaticas = st.checkbox("Mostrar apenas apostas automáticas (automatica > 0)", value=False)
@@ -104,6 +116,8 @@ def main():
         filtro = filtro[filtro["tipo_aposta"] == inv_tipos_map[tipo_filtro]]
     if data_sel != "Todas":
         filtro = filtro[filtro["data"] == data_sel]
+    if status_sel != "Todos":
+        filtro = filtro[filtro["status"].fillna("Registrada") == status_sel]
     if mostrar_automaticas:
         filtro = filtro[filtro["automatica"] > 0]
 
@@ -123,7 +137,7 @@ def main():
         filtro_show["Pilotos/Fichas"] = filtro_show["aposta"]
 
     colunas_exibir = [
-        "data", "horario", "apostador", "nome_prova", "Pilotos/Fichas", "piloto_11", "Tipo de Aposta", "Automática"
+        "data", "horario", "apostador", "nome_prova", "Pilotos/Fichas", "piloto_11", "Tipo de Aposta", "Automática", "ip_address", "status"
     ]
     if "automatica" in filtro_show.columns and "tipo_aposta" in filtro_show.columns:
         st.dataframe(
@@ -133,7 +147,9 @@ def main():
                 "apostador": "Apostador",
                 "nome_prova": "Prova",
                 "Pilotos/Fichas": "Pilotos/Fichas",
-                "piloto_11": "11º Colocado"
+                "piloto_11": "11º Colocado",
+                "ip_address": "IP",
+                "status": "Status"
             }),
             width="stretch"
         )
