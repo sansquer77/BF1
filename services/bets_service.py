@@ -377,7 +377,7 @@ def _gerar_copy_email_aposta(
         "A equipe validou o plano: aposta registrada e pronta para luzes apagarem.",
         "Missão concluída no box: sua combinação foi salva com sucesso.",
         "Aposta travada no sistema. Agora é torcer para a leitura de corrida bater.",
-        "Tudo certo por aqui: sua cartela entrou oficialmente na prova.",
+        "Tudo certo por aqui: sua equipe entrou oficialmente na prova.",
     ]
 
     fechamentos = [
@@ -552,7 +552,10 @@ def _gerar_aposta_perplexity(
         api_key = st.secrets.get("PERPLEXITY_API_KEY", "")
         model = st.secrets.get("PERPLEXITY_MODEL", "sonar")
     except Exception:
+        pass
+    if not api_key:
         api_key = os.environ.get("PERPLEXITY_API_KEY", "")
+    if not model:
         model = os.environ.get("PERPLEXITY_MODEL", "sonar")
     if not api_key:
         return None
@@ -849,6 +852,24 @@ def salvar_aposta(
                 probabilidade = analise.get("probabilidade")
                 resumo = str(analise.get("resumo", "")).strip()
 
+                # Mantém coerência entre chance de acerto e pontos projetados.
+                try:
+                    prob_i = int(float(probabilidade)) if probabilidade is not None else None
+                except Exception:
+                    prob_i = None
+                try:
+                    pontos_i = float(pontos_estimados) if pontos_estimados is not None else None
+                except Exception:
+                    pontos_i = None
+                if pontos_i is not None:
+                    cap_por_pontos = int(max(10, min(95, round(pontos_i * 1.6))))
+                    if prob_i is None:
+                        prob_i = cap_por_pontos
+                    else:
+                        prob_i = min(prob_i, cap_por_pontos)
+                if prob_i is not None:
+                    probabilidade = max(0, min(100, prob_i))
+
                 abertura_email, fechamento_email = _gerar_copy_email_aposta(
                     nome_usuario=str(usuario.get('nome', 'Participante')),
                     nome_prova=nome_prova_bd,
@@ -861,17 +882,17 @@ def salvar_aposta(
 
                 previsao_html = ""
                 if comentario:
-                    previsao_html += "<p><b>Comentário sarcástico:</b><br>" + "<br>".join(html.escape(comentario).splitlines()) + "</p>"
+                    previsao_html += "<p>" + "<br>".join(html.escape(comentario).splitlines()) + "</p>"
                 if pontos_estimados is not None:
                     previsao_html += (
-                        f"<p><b>Estimativa de pontos (Ergast):</b> {float(pontos_estimados):.1f} "
-                        f"<small>(bônus 11º esperado: {float(bonus_11_estimado):.1f}, chance 11º: {int(chance_11)}%)</small></p>"
+                        f"<p><b>Estimativa de pontos:</b> {float(pontos_estimados):.1f}</p>"
                     )
+                if chance_11 is not None:
+                    previsao_html += f"<p><b>Probabilidade de acerto do 11º colocado:</b> {int(chance_11)}%</p>"
                 if probabilidade is not None:
                     previsao_html += f"<p><b>Probabilidade estimada de acerto:</b> {int(probabilidade)}%</p>"
                 if resumo:
                     previsao_html += "<p><b>Base da estimativa:</b> " + html.escape(resumo) + "</p>"
-                previsao_html += "<p><small><b>Critérios Ergast:</b> " + html.escape(criterios_estimativa) + "</small></p>"
 
                 corpo_email = (
                     f"<p>Olá {html.escape(usuario['nome'])},</p>"
@@ -884,8 +905,8 @@ def salvar_aposta(
                     f"<li>Palpite para 11º colocado: {html.escape(piloto_11)}</li>"
                     "</ul>"
                     f"{previsao_html}"
-                    "<p><small><b>Aviso de estimativa:</b> a probabilidade informada é apenas uma projeção estatística/opinativa com base em informações disponíveis e pode variar a qualquer momento. Não constitui garantia de resultado esportivo nem direito a pontuação, prevalecendo sempre as regras oficiais do bolão.</small></p>"
                     f"<p>{html.escape(fechamento_email)}</p>"
+                    "<p><small><b>Aviso de estimativa:</b> a probabilidade informada é apenas uma projeção estatística/opinativa com base em informações disponíveis e pode variar a qualquer momento. Não constitui garantia de resultado esportivo nem direito a pontuação, prevalecendo sempre as regras oficiais do bolão.</small></p>"
                 )
             except Exception as e:
                 logger.exception(f"Falha ao montar conteúdo avançado do email de aposta para {usuario.get('email')}: {e}")
