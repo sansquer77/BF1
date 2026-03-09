@@ -4,6 +4,7 @@ import logging
 import os
 import json
 import ast
+import math
 import hashlib
 import importlib
 from datetime import datetime
@@ -259,9 +260,13 @@ def _estimar_pontos_aposta_ergast(
     regras: dict,
     contexto_ergast: dict,
 ) -> dict:
-    """Estima pontos da aposta usando sinais compactos da Ergast (tp/du/vr).
+    """Estima pontos usando alocação de posições mais prováveis sem duplicidade.
 
-    Não altera regra de pontuação oficial; serve apenas para comentário preditivo em email.
+    Regra aplicada:
+    - monta distribuição de probabilidade por piloto para cada posição pontuável
+    - escolhe uma posição única por piloto (sem duas apostas na mesma posição)
+    - calcula pontos estimados com a posição escolhida * fichas
+    - calcula probabilidade combinada de acerto a partir das probabilidades escolhidas
     """
     pontos_f1 = [25, 18, 15, 12, 10, 8, 6, 4, 2, 1]
     pontos_sprint = [8, 7, 6, 5, 4, 3, 2, 1]
@@ -298,39 +303,105 @@ def _estimar_pontos_aposta_ergast(
         if _norm_nome_piloto(row.get("n"))
     }
 
-    total_estimado = 0.0
-    detalhes_linhas: list[str] = []
-
+    # Prepara pilotos válidos (fichas > 0)
+    pilotos_validos: list[tuple[str, int]] = []
     for piloto, ficha in zip(pilotos, fichas):
-        nome_key = _norm_nome_piloto(piloto)
         try:
             ficha_i = int(ficha)
         except Exception:
             ficha_i = 0
+        if ficha_i > 0:
+            pilotos_validos.append((piloto, ficha_i))
 
-        if ficha_i <= 0:
-            continue
+    n_pos = len(pontos_lista)
+    if not pilotos_validos or n_pos <= 0:
+        return {
+            "pontos_estimados": 0.0,
+            "bonus_11_estimado": 0.0,
+            "chance_11": 0,
+            "probabilidade_combinada": 0,
+            "criterios": "Ergast(tp/du/vr) + regras da prova",
+            "detalhes": "Sem dados suficientes para estimativa.",
+        }
 
-        pos = pos_por_nome.get(nome_key)
-        if pos is not None and 1 <= pos <= len(pontos_lista):
-            base = float(pontos_lista[pos - 1])
-            origem = f"pos{pos}"
-        elif pos is not None:
-            base = 0.0
-            origem = f"pos{pos}"
-        else:
-            # Piloto fora do top da Ergast compactada: baseline conservador.
-            base = 0.6 if len(pontos_lista) >= 10 else 0.3
-            origem = "fora_top"
-
+    # Matriz de probabilidade por piloto/posição (1..n_pos)
+    prob_por_piloto: list[list[float]] = []
+    for piloto, _ in pilotos_validos:
+        nome_key = _norm_nome_piloto(piloto)
+        base_rank = pos_por_nome.get(nome_key)
         delta = int(delta_por_nome.get(nome_key, 0))
-        mult_delta = 1.0 + max(-0.15, min(0.20, delta * 0.03))
-        mult_vr = 1.05 if nome_key in vr_set else 1.0
+        ajuste_vr = -0.6 if nome_key in vr_set else 0.0
 
-        estimado_piloto = max(0.0, base * mult_delta * mult_vr * ficha_i)
-        total_estimado += estimado_piloto
+        if base_rank is None:
+            mu = min(float(n_pos), max(1.0, n_pos * 0.72 + ajuste_vr))
+            sigma = 2.8 if not is_sprint else 2.2
+        else:
+            mu = float(base_rank) - (0.32 * float(delta)) + ajuste_vr
+            mu = min(float(n_pos), max(1.0, mu))
+            sigma = 1.9 if not is_sprint else 1.5
+
+        row = []
+        for pos_idx in range(1, n_pos + 1):
+            z = (float(pos_idx) - mu) / sigma
+            row.append(math.exp(-0.5 * z * z))
+        s = sum(row)
+        if s <= 0:
+            row = [1.0 / n_pos] * n_pos
+        else:
+            row = [v / s for v in row]
+        prob_por_piloto.append(row)
+
+    # Escolhe posição única por piloto maximizando (pontos * fichas * prob)
+    pilotos_top = pilotos_validos[:n_pos]
+    probs_top = prob_por_piloto[:n_pos]
+    m = len(pilotos_top)
+
+    dp: dict[tuple[int, int], tuple[float, list[int]]] = {(0, 0): (0.0, [])}
+    for i in range(m):
+        ficha_i = pilotos_top[i][1]
+        novo_dp: dict[tuple[int, int], tuple[float, list[int]]] = {}
+        for (idx, mask), (score, escolha) in dp.items():
+            if idx != i:
+                continue
+            for pos0 in range(n_pos):
+                bit = 1 << pos0
+                if mask & bit:
+                    continue
+                p = probs_top[i][pos0]
+                ganho = float(pontos_lista[pos0]) * float(ficha_i) * p
+                chave = (i + 1, mask | bit)
+                atual = novo_dp.get(chave)
+                candidato = (score + ganho, escolha + [pos0 + 1])
+                if atual is None or candidato[0] > atual[0]:
+                    novo_dp[chave] = candidato
+        dp = novo_dp
+
+    melhor_score = -1.0
+    melhor_escolha: list[int] = []
+    for (idx, _mask), (score, escolha) in dp.items():
+        if idx == m and score > melhor_score:
+            melhor_score = score
+            melhor_escolha = escolha
+
+    if not melhor_escolha:
+        # fallback robusto: posições em ordem de maior probabilidade sem repetir
+        melhor_escolha = []
+        usadas: set[int] = set()
+        for row in probs_top:
+            ordem = sorted(range(1, n_pos + 1), key=lambda p: row[p - 1], reverse=True)
+            pos_sel = next((p for p in ordem if p not in usadas), ordem[0])
+            melhor_escolha.append(pos_sel)
+            usadas.add(pos_sel)
+
+    pontos_estimados = 0.0
+    detalhes_linhas: list[str] = []
+    probs_escolhidas: list[tuple[float, int]] = []
+    for (piloto, ficha_i), pos_sel, row in zip(pilotos_top, melhor_escolha, probs_top):
+        prob_sel = max(0.001, min(0.999, float(row[pos_sel - 1])))
+        pontos_estimados += float(pontos_lista[pos_sel - 1]) * float(ficha_i)
+        probs_escolhidas.append((prob_sel, ficha_i))
         detalhes_linhas.append(
-            f"{piloto}: ficha={ficha_i}, base={base:.1f}, delta={delta}, vr={'sim' if nome_key in vr_set else 'nao'}, ref={origem}"
+            f"{piloto}: ficha={ficha_i}, pos~{pos_sel}, p={prob_sel:.3f}"
         )
 
     bonus_11 = float(regras.get("pontos_11_colocado", 25) or 25)
@@ -346,12 +417,23 @@ def _estimar_pontos_aposta_ergast(
         chance_11 = 0.20
 
     bonus_11_estimado = bonus_11 * chance_11
-    total_estimado += bonus_11_estimado
+
+    # Combinação das probabilidades por piloto (média geométrica ponderada por fichas).
+    if probs_escolhidas:
+        soma_pesos = float(sum(w for _, w in probs_escolhidas))
+        if soma_pesos > 0:
+            log_media = sum((w * math.log(p)) for p, w in probs_escolhidas) / soma_pesos
+            probabilidade_combinada = int(round(math.exp(log_media) * 100.0))
+        else:
+            probabilidade_combinada = 0
+    else:
+        probabilidade_combinada = 0
 
     return {
-        "pontos_estimados": round(total_estimado, 1),
+        "pontos_estimados": round(pontos_estimados, 1),
         "bonus_11_estimado": round(bonus_11_estimado, 1),
         "chance_11": int(round(chance_11 * 100)),
+        "probabilidade_combinada": max(0, min(100, probabilidade_combinada)),
         "criterios": "Ergast(tp/du/vr) + regras da prova",
         "detalhes": " | ".join(detalhes_linhas[:5]),
     }
@@ -832,6 +914,7 @@ def salvar_aposta(
                 pontos_estimados = estimativa_email.get("pontos_estimados")
                 bonus_11_estimado = estimativa_email.get("bonus_11_estimado")
                 chance_11 = estimativa_email.get("chance_11")
+                probabilidade_combinada = estimativa_email.get("probabilidade_combinada")
                 criterios_estimativa = str(estimativa_email.get("criterios", "Ergast + regras da prova"))
                 detalhes_estimativa = str(estimativa_email.get("detalhes", "")).strip()
 
@@ -851,6 +934,10 @@ def salvar_aposta(
                 comentario = str(analise.get("comentario", "")).strip()
                 probabilidade = analise.get("probabilidade")
                 resumo = str(analise.get("resumo", "")).strip()
+
+                # Probabilidade principal do email deve seguir a combinação das probabilidades por piloto.
+                if probabilidade_combinada is not None:
+                    probabilidade = probabilidade_combinada
 
                 # Mantém coerência entre chance de acerto e pontos projetados.
                 try:
@@ -891,8 +978,6 @@ def salvar_aposta(
                     previsao_html += f"<p><b>Probabilidade de acerto do 11º colocado:</b> {int(chance_11)}%</p>"
                 if probabilidade is not None:
                     previsao_html += f"<p><b>Probabilidade estimada de acerto:</b> {int(probabilidade)}%</p>"
-                if resumo:
-                    previsao_html += "<p><b>Base da estimativa:</b> " + html.escape(resumo) + "</p>"
 
                 corpo_email = (
                     f"<p>Olá {html.escape(usuario['nome'])},</p>"
