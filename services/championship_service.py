@@ -153,11 +153,16 @@ def save_championship_bet(user_id: int, user_nome: str, champion: str, vice: str
                 "<p><small><b>Aviso de estimativa:</b> a probabilidade informada é apenas uma projeção estatística/opinativa com base em informações disponíveis e pode variar a qualquer momento. Não constitui garantia de resultado esportivo nem direito a pontuação, prevalecendo sempre as regras oficiais do bolão.</small></p>"
                 "<p>Boa sorte!</p>"
             )
-            enviar_email(usuario.get('email', ''), f"Aposta de campeonato registrada - {season_val}", corpo_email)
+            email_ok = enviar_email(usuario.get('email', ''), f"Aposta de campeonato registrada - {season_val}", corpo_email)
+            if not email_ok:
+                logger.warning(
+                    "Email de confirmação da aposta de campeonato não foi enviado (user_id=%s, season=%s)",
+                    user_id,
+                    season_val,
+                )
         except Exception as mail_error:
             logger.warning(f"Falha ao enviar email de confirmação da aposta de campeonato (user_id={user_id}): {mail_error}")
-
-            return True
+        return True
     except Exception as e:
         logger.exception(f"Erro ao salvar aposta de campeonato (user_id={user_id}, season={season_val}): {e}")
         return False

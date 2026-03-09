@@ -24,6 +24,12 @@ try:
 except (FileNotFoundError, KeyError):
     SENHA_REMETENTE_RAW = None
 
+if not SENHA_REMETENTE_RAW:
+    try:
+        SENHA_REMETENTE_RAW = st.secrets.get("SENHA_REMETENTE")
+    except (FileNotFoundError, KeyError):
+        SENHA_REMETENTE_RAW = None
+
 try:
     EMAIL_ADMIN_RAW: Optional[str] = st.secrets.get("EMAIL_ADMIN")
 except (FileNotFoundError, KeyError):
@@ -40,7 +46,11 @@ except (FileNotFoundError, KeyError):
     PERPLEXITY_MODEL_RAW = None
 
 EMAIL_REMETENTE: str = EMAIL_REMETENTE_RAW or os.environ.get("EMAIL_REMETENTE", "")
-SENHA_REMETENTE: str = SENHA_REMETENTE_RAW or os.environ.get("SENHA_EMAIL", "")
+SENHA_REMETENTE: str = (
+    SENHA_REMETENTE_RAW
+    or os.environ.get("SENHA_EMAIL", "")
+    or os.environ.get("SENHA_REMETENTE", "")
+)
 EMAIL_ADMIN: str = EMAIL_ADMIN_RAW or os.environ.get("EMAIL_ADMIN", "")
 PERPLEXITY_API_KEY: str = PERPLEXITY_API_KEY_RAW or os.environ.get("PERPLEXITY_API_KEY", "")
 PERPLEXITY_MODEL: str = PERPLEXITY_MODEL_RAW or os.environ.get("PERPLEXITY_MODEL", "sonar")

@@ -245,37 +245,42 @@ def login_view():
             
             # ========== LOGIN SUCESSO ==========
             try:
-                # Gerar JWT Token
                 token = create_token(
                     user_id=usuario['id'],
                     nome=usuario['nome'],
                     perfil=usuario['perfil'],
                     status=usuario.get('status', 'Ativo')
                 )
-                
-                # Armazenar no session_state
-                st.session_state['token'] = token
-                st.session_state['user_id'] = usuario['id']
-                st.session_state['user_email'] = usuario['email']
-                st.session_state['user_nome'] = usuario['nome']
-                st.session_state['user_role'] = usuario['perfil']
-                st.session_state['pagina'] = "Painel do Participante"
-                st.session_state['force_password_change'] = bool(usuario.get('must_change_password', 0))
-                set_auth_cookies(token)
-                
-                # Registrar sucesso
-                registrar_tentativa_login(email, True, ip_address=client_ip, action="login")
-                
-                logger.info(f"✓ Login bem-sucedido: {email} ({usuario['perfil']})")
-                
-                st.success(f"✅ Bem-vindo, {usuario['nome']}!")
-                st.balloons()
-                
-                # Rerun para carregar próxima página
-                st.rerun()
-                
             except Exception as e:
-                st.error(f"❌ Erro ao gerar token de autenticação.")
+                logger.exception("Falha ao criar token JWT no login: %s", e)
+                st.error("❌ Erro ao gerar token de autenticação.")
+                return
+
+            # Armazenar no session_state
+            st.session_state['token'] = token
+            st.session_state['user_id'] = usuario['id']
+            st.session_state['user_email'] = usuario['email']
+            st.session_state['user_nome'] = usuario['nome']
+            st.session_state['user_role'] = usuario['perfil']
+            st.session_state['pagina'] = "Painel do Participante"
+            st.session_state['force_password_change'] = bool(usuario.get('must_change_password', 0))
+
+            try:
+                set_auth_cookies(token)
+            except Exception as cookie_error:
+                # Não bloquear login por falha de persistência do cookie.
+                logger.warning("Falha ao persistir cookie de sessao no login: %s", cookie_error)
+
+            # Registrar sucesso
+            registrar_tentativa_login(email, True, ip_address=client_ip, action="login")
+
+            logger.info(f"✓ Login bem-sucedido: {email} ({usuario['perfil']})")
+
+            st.success(f"✅ Bem-vindo, {usuario['nome']}!")
+            st.balloons()
+
+            # Rerun para carregar próxima página
+            st.rerun()
 
         # ========== ESQUECI A SENHA ==========
         with st.expander("Esqueci a senha"):
