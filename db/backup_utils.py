@@ -599,9 +599,16 @@ def upload_tabela():
                         df_alinhado[col_name] = coerced.where(~coerced.isna(), None)
                         continue
                     if any(t in col_type for t in ["DATE", "TIME"]):
-                        coerced = pd.to_datetime(series, errors='coerce', dayfirst=True)
-                        formatted = coerced.dt.strftime('%Y-%m-%d %H:%M:%S')
-                        df_alinhado[col_name] = formatted.where(coerced.notna(), None)
+                        # Handle mixed Excel datetime values safely (strings, numbers, native datetimes).
+                        def _format_datetime_value(value):
+                            if pd.isna(value):
+                                return None
+                            parsed = pd.to_datetime(value, errors='coerce', dayfirst=True)
+                            if pd.isna(parsed):
+                                return None
+                            return parsed.strftime('%Y-%m-%d %H:%M:%S')
+
+                        df_alinhado[col_name] = series.apply(_format_datetime_value)
                         continue
 
                 df_alinhado = df_alinhado.where(pd.notnull(df_alinhado), None)
