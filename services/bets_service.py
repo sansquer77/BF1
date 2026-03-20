@@ -1569,19 +1569,29 @@ def salvar_classificacao_prova(p_id, df_c, temp=None):
         for _, r in df_c.iterrows():
             if has_temporada:
                 c.execute(
-                    'INSERT OR REPLACE INTO posicoes_participantes (prova_id, usuario_id, posicao, pontos, temporada) VALUES (?,?,?,?,?)',
+                    'INSERT INTO posicoes_participantes (prova_id, usuario_id, posicao, pontos, temporada) VALUES (?,?,?,?,?)',
                     (p_id, int(r['usuario_id']), int(r['posicao']), float(r['pontos']), temp)
                 )
             else:
                 c.execute(
-                    'INSERT OR REPLACE INTO posicoes_participantes (prova_id, usuario_id, posicao, pontos) VALUES (?,?,?,?)',
+                    'INSERT INTO posicoes_participantes (prova_id, usuario_id, posicao, pontos) VALUES (?,?,?,?)',
                     (p_id, int(r['usuario_id']), int(r['posicao']), float(r['pontos']))
                 )
         conn.commit()
 
 def atualizar_classificacoes_todas_as_provas(temporada: Optional[str] = None):
     with db_connect() as conn:
-        usrs = cast(pd.DataFrame, pd.read_sql('SELECT id FROM usuarios WHERE status = "Ativo"', conn))
+        usrs = cast(
+            pd.DataFrame,
+            pd.read_sql(
+                """
+                SELECT id
+                FROM usuarios
+                WHERE lower(trim(coalesce(status, ''))) = 'ativo'
+                """,
+                conn,
+            ),
+        )
         provs = cast(pd.DataFrame, pd.read_sql('SELECT id, nome, data, tipo, temporada FROM provas', conn))
         apts = cast(pd.DataFrame, pd.read_sql('SELECT usuario_id, prova_id, data_envio, pilotos, fichas, piloto_11, automatica, temporada FROM apostas', conn))
         ress = cast(pd.DataFrame, pd.read_sql('SELECT prova_id, posicoes, abandono_pilotos FROM resultados', conn))

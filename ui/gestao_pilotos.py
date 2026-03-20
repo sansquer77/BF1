@@ -7,6 +7,23 @@ Reorganizado em abas: Editar Pilotos / Adicionar Novo Piloto
 import streamlit as st
 import pandas as pd
 from db.db_utils import get_pilotos_df, db_connect
+from utils.helpers import render_page_header
+
+
+def _normalizar_df_pilotos(df: pd.DataFrame) -> pd.DataFrame:
+    """Normaliza DataFrame de pilotos para evitar quebra por IDs inválidos."""
+    if df.empty:
+        return df
+
+    df_norm = df.copy()
+    if "id" not in df_norm.columns:
+        return pd.DataFrame(columns=df_norm.columns)
+
+    # Remove linhas com id não numérico (ex.: valor textual "id" vindo de leitura inconsistente)
+    df_norm["id"] = pd.to_numeric(df_norm["id"], errors="coerce")
+    df_norm = df_norm[df_norm["id"].notna()].copy()
+    df_norm["id"] = df_norm["id"].astype(int)
+    return df_norm
 
 
 def _on_piloto_change():
@@ -68,7 +85,11 @@ def _render_aba_editar(df: pd.DataFrame):
     
     # Encontrar o piloto selecionado
     piloto_row = df[df["opcao_display"] == selected].iloc[0]
-    piloto_id = int(piloto_row["id"])
+    try:
+        piloto_id = int(piloto_row["id"])
+    except (TypeError, ValueError):
+        st.error("❌ ID do piloto inválido. Atualize a página e tente novamente.")
+        return
     
     # Obter valores do piloto selecionado
     nome_atual = piloto_row["nome"]
@@ -199,7 +220,7 @@ def _render_aba_adicionar():
 
 
 def main():
-    st.title("🏎️ Gestão de Pilotos")
+    render_page_header(st, "Gestão de Pilotos")
     
     # Verificar permissão
     perfil = st.session_state.get("user_role", "participante")
@@ -208,7 +229,9 @@ def main():
         return
     
     # Buscar pilotos com cache
-    df = get_pilotos_df().sort_values(by="nome")
+    df = _normalizar_df_pilotos(get_pilotos_df())
+    if not df.empty:
+        df = df.sort_values(by="nome")
     
     # Criar abas
     tab_editar, tab_adicionar = st.tabs(["✏️ Editar Pilotos", "➕ Adicionar Novo Piloto"])

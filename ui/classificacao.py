@@ -13,7 +13,12 @@ from db.db_utils import db_connect, get_participantes_temporada_df, get_provas_d
 from services.championship_service import get_championship_bets_df, get_final_results
 from services.rules_service import get_regras_aplicaveis
 from services.bets_service import calcular_pontuacao_lote, atualizar_classificacoes_todas_as_provas, _parse_datetime_sp
+from utils.helpers import render_page_header
 from utils.season_utils import get_default_season_index, get_season_options
+
+
+def _table_height(total_rows: int, row_height: int = 38, max_height: int = 700) -> int:
+    return min(max_height, 40 + (max(total_rows, 1) * row_height))
 
 def formatar_brasileiro(valor):
     try:
@@ -160,11 +165,7 @@ def destacar_heatmap(df, resultados_df, provas_ids_ordenados):
     return df.style.apply(colorir_prova_heatmap, axis=1)
 
 def main():
-    col1, col2 = st.columns([1, 16])
-    with col1:
-        st.image("BF1.jpg", width=75)
-    with col2:
-        st.title("Classificação Geral do Bolão")
+    render_page_header(st, "Classificação Geral do Bolão")
 
     current_year = dt.datetime.now().year
     season_options = get_season_options(fallback_years=["2025", "2026"])
@@ -411,7 +412,28 @@ def main():
         "Movimentação"
     ]
     st.subheader("Classificação Geral (Provas + Campeonato)")
-    st.table(df_display[colunas_ordem])
+    total_rows = len(df_display.index)
+    table_height = _table_height(total_rows)
+    class_config = {
+        "Posição": st.column_config.NumberColumn("Posição", format="%d", width="small"),
+        "Participante": st.column_config.TextColumn("Participante", width="medium"),
+        "Pontos Provas": st.column_config.TextColumn("Pontos Provas", width="small"),
+        "Bônus Campeão": st.column_config.TextColumn("Bônus Campeão", width="small"),
+        "Bônus Vice": st.column_config.TextColumn("Bônus Vice", width="small"),
+        "Bônus Equipe": st.column_config.TextColumn("Bônus Equipe", width="small"),
+        "Pontos Campeonato": st.column_config.TextColumn("Pontos Campeonato", width="small"),
+        "Total Geral": st.column_config.TextColumn("Total Geral", width="small"),
+        "Diferença": st.column_config.TextColumn("Diferença", width="small"),
+        "Movimentação": st.column_config.TextColumn("Movimentação", width="small"),
+    }
+    st.dataframe(
+        df_display[colunas_ordem],
+        hide_index=True,
+        width="stretch",
+        height=table_height,
+        row_height=38,
+        column_config=class_config,
+    )
 
     csv_classificacao = df_display[colunas_ordem].to_csv(index=False)
     st.download_button(
@@ -454,7 +476,16 @@ def main():
     )
     df_formatado = df_cruzada.map(lambda x: formatar_brasileiro(float(x)))
     df_styled = destacar_heatmap(df_formatado, resultados_df, provas_ids_ordenados)
-    st.dataframe(df_styled)
+    prova_config = {
+        "_index": st.column_config.TextColumn("Prova", width="medium"),
+        **{col: st.column_config.TextColumn(str(col), width="small") for col in df_formatado.columns},
+    }
+    st.dataframe(
+        df_styled,
+        width="stretch",
+        height=_table_height(len(df_formatado), max_height=760),
+        column_config=prova_config,
+    )
 
     st.subheader("Imagem da classificação de uma prova específica")
     prova_selecionada = st.selectbox(
@@ -499,8 +530,25 @@ def main():
             yaxis_title="Pontuação Acumulada",
             xaxis_tickangle=-45,
             margin=dict(l=40, r=20, t=60, b=80),
-            plot_bgcolor='rgba(240,240,255,0.9)',
-            yaxis=dict(tickformat=',.0f')
+            plot_bgcolor='#000000',
+            paper_bgcolor='#000000',
+            font=dict(color='#F5F7FA'),
+            xaxis=dict(
+                tickfont=dict(color='#F5F7FA'),
+                title_font=dict(color='#F5F7FA'),
+                gridcolor='rgba(255,255,255,0.16)'
+            ),
+            yaxis=dict(
+                tickformat=',.0f',
+                tickfont=dict(color='#F5F7FA'),
+                title_font=dict(color='#F5F7FA'),
+                gridcolor='rgba(255,255,255,0.16)',
+                zerolinecolor='rgba(255,255,255,0.25)'
+            ),
+            legend=dict(
+                font=dict(color='#F5F7FA'),
+                bgcolor='rgba(0,0,0,0.35)'
+            )
         )
         st.plotly_chart(fig, width="stretch")
 

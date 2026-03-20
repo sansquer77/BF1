@@ -3,6 +3,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import ast
 import datetime
+import re
 
 from db.db_utils import (
     db_connect, get_user_by_id, get_provas_df, get_pilotos_df, get_apostas_df, get_resultados_df,
@@ -12,6 +13,7 @@ from services.bets_service import salvar_aposta, calcular_pontuacao_lote, gerar_
 from services.auth_service import check_password, hash_password
 from services.rules_service import get_regras_aplicaveis
 from utils.datetime_utils import now_sao_paulo, parse_datetime_sao_paulo
+from utils.helpers import render_page_header
 from utils.season_utils import get_default_season_index, get_season_options
 
 
@@ -23,10 +25,21 @@ def _parse_data_prova(data_raw):
     if not raw:
         return None
 
-    for dayfirst in (True, False):
-        parsed = pd.to_datetime(raw, errors='coerce', dayfirst=dayfirst)
+    formatos_explicitos = (
+        "%Y-%m-%d",
+        "%Y/%m/%d",
+        "%d/%m/%Y",
+        "%d-%m-%Y",
+    )
+    for formato in formatos_explicitos:
+        parsed = pd.to_datetime(raw, format=formato, errors='coerce')
         if pd.notna(parsed):
             return parsed
+
+    usa_dayfirst = bool(re.match(r"^\d{1,2}[-/]\d{1,2}[-/]\d{4}$", raw))
+    parsed = pd.to_datetime(raw, errors='coerce', dayfirst=usa_dayfirst)
+    if pd.notna(parsed):
+        return parsed
     return None
 
 
@@ -127,19 +140,16 @@ def participante_view():
         st.error("Usuário não encontrado.")
         return
 
-    col1, col2 = st.columns([1, 16])  # Proporção ajustável conforme aparência desejada
-    with col1:
-        st.image("BF1.jpg", width=75)
-    with col2:
-        st.title("Painel do Participante")
-        season_options = get_season_options(fallback_years=["2025", "2026"])
-        if not season_options:
-            st.info("Não há temporadas disponíveis para consulta no seu histórico de status.")
-            return
-        default_index = get_default_season_index(season_options)
+    render_page_header(st, "Painel do Participante")
 
-        season = st.selectbox("Temporada", season_options, index=default_index)
-        st.session_state['temporada'] = season
+    season_options = get_season_options(fallback_years=["2025", "2026"])
+    if not season_options:
+        st.info("Não há temporadas disponíveis para consulta no seu histórico de status.")
+        return
+    default_index = get_default_season_index(season_options)
+
+    season = st.selectbox("Temporada", season_options, index=default_index)
+    st.session_state['temporada'] = season
     
     st.write(f"Bem-vindo, {user['nome']} ({user['email']}) - Status: {user['perfil']}")
 
@@ -230,7 +240,7 @@ def participante_view():
                         elif prova_atual_sel not in prova_ids_validos:
                             st.session_state["sel_prova_aposta"] = proxima_prova_id
 
-                    col_sel, col_btn, col_sem_ideias = st.columns([4, 1, 1])
+                    col_sel, col_btn, col_sem_ideias = st.columns([6, 1.2, 1.4])
                     with col_sel:
                         prova_id = st.selectbox(
                             "Escolha a prova",
@@ -240,14 +250,16 @@ def participante_view():
                             on_change=_on_prova_change
                         )
                     with col_btn:
-                        if st.button("Ver regras", width="stretch"):
+                        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                        if st.button("Ver regras", width="content"):
                             prova_nome_sel = provas[provas['id'] == prova_id]['nome'].values[0]
                             tipo_raw = provas[provas['id'] == prova_id]['tipo'].values[0] if not provas[provas['id'] == prova_id].empty else 'Normal'
                             tipo_sel = 'Sprint' if str(tipo_raw).strip().lower() == 'sprint' or 'sprint' in str(prova_nome_sel).lower() else 'Normal'
                             regras_sel = get_regras_aplicaveis(temporada, tipo_sel)
                             _mostrar_regras_dialog(regras_sel, temporada, tipo_sel)
                     with col_sem_ideias:
-                        if st.button("Sem ideias", width="stretch"):
+                        st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+                        if st.button("Sem ideias", width="content"):
                             nome_prova_sem_ideias = provas[provas['id'] == prova_id]['nome'].values[0]
                             ok_auto, msg_auto = gerar_aposta_sem_ideias(
                                 usuario_id=user['id'],
@@ -339,7 +351,7 @@ def participante_view():
                                     if key_fichas not in st.session_state:
                                         st.session_state[key_fichas] = int(fichas_ant[i]) if len(fichas_ant) > i else 0
                                     valor_ficha = st.number_input(
-                                        f"Fichas para {piloto_sel}", min_value=0, max_value=quantidade_fichas,
+                                        f"Fichas para {piloto_sel}", min_value=0, max_value=fichas_max_por_piloto,
                                         key=key_fichas
                                     )
                                 else:
@@ -354,6 +366,30 @@ def participante_view():
                     fichas_validas = [f for i, f in enumerate(fichas_aposta) if pilotos_aposta[i] != "Nenhum"]
                     equipes_apostadas = [pilotos_equipe[p] for p in pilotos_validos]
                     total_fichas = sum(fichas_validas)
+
+                    total_ok = total_fichas == quantidade_fichas
+                    total_cor = "#1f9d55" if total_ok else "#c62828"
+                    total_status = "Correto" if total_ok else "Incorreto"
+                    diferenca_fichas = quantidade_fichas - total_fichas
+                    if total_ok:
+                        total_detalhe = "total exato"
+                    elif diferenca_fichas > 0:
+                        total_detalhe = f"faltam {diferenca_fichas}"
+                    else:
+                        total_detalhe = f"sobram {abs(diferenca_fichas)}"
+                    st.markdown(
+                        (
+                            "<div style=\"padding:10px 12px;border-radius:8px;"
+                            "border:1px solid #d0d7de;background:#f8f9fa;margin:8px 0 12px 0;\">"
+                            "<strong>Total de fichas:</strong> "
+                            f"<span style='color:{total_cor};font-weight:700'>{total_fichas}/{quantidade_fichas}</span> "
+                            f"<span style='color:{total_cor};font-weight:600'>({total_status})</span> "
+                            f"<span style='color:{total_cor};font-weight:600'>- {total_detalhe}</span>"
+                            "</div>"
+                        ),
+                        unsafe_allow_html=True,
+                    )
+
                     pilotos_11_opcoes = [p for p in pilotos if p not in pilotos_validos]
                     if not pilotos_11_opcoes:
                         pilotos_11_opcoes = pilotos
@@ -493,7 +529,7 @@ def participante_view():
                                 st.write("**Sprint com pontuação dobrada:** Sim")
                             else:
                                 st.write("**Sprint com pontuação dobrada:** Não")
-                        st.dataframe(pd.DataFrame(dados), hide_index=True)
+                        st.dataframe(pd.DataFrame(dados), hide_index=True, width="stretch")
                         st.write(f"**11º Apostado:** {piloto_11_apostado} | **11º Real:** {piloto_11_real} | **Pontos 11º:** {pontos_11_col}")
                         if penalidade_abandono:
                             st.write(f"**Penalidade por abandono:** -{penalidade_abandono}")

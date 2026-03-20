@@ -10,15 +10,24 @@ import bcrypt
 import logging
 import os
 import re
+import warnings
 from functools import lru_cache
 from typing import Optional
-from db.connection_pool import get_pool, init_pool
+from db.connection_pool import get_pool
 from db.db_config import BCRYPT_ROUNDS, DB_PATH
 
 logger = logging.getLogger(__name__)
 
+# Evita poluição de logs com warning conhecido do pandas ao usar adaptador DBAPI customizado.
+warnings.filterwarnings(
+    "ignore",
+    message=r"pandas only supports SQLAlchemy connectable.*",
+    category=UserWarning,
+)
+
 import datetime
 from db.rules_utils import init_rules_table
+from db.db_config import DB_BACKEND
 
 # NÃO inicializar pool aqui - será lazy-initialized em get_pool()
 # Isso evita criar pool com arquivo antigo antes da importação substituir
@@ -28,6 +37,49 @@ from db.rules_utils import init_rules_table
 def db_connect():
     """Retorna uma conexão do pool"""
     return get_pool().get_connection()
+
+
+def _sync_postgres_sequences(conn) -> None:
+    """Sincroniza sequências de colunas id no PostgreSQL com o maior valor atual."""
+    if DB_BACKEND != "postgres":
+        return
+    c = conn.cursor()
+    c.execute(
+        """
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = current_schema()
+          AND table_type = 'BASE TABLE'
+        """
+    )
+    table_names = [str(r[0]) for r in (c.fetchall() or []) if r and r[0]]
+
+    for table_name in table_names:
+        try:
+            c.execute(f"PRAGMA table_info('{table_name}')")
+            cols = [str(r[1]).lower() for r in (c.fetchall() or []) if len(r) > 1 and r[1]]
+            if "id" not in cols:
+                continue
+
+            c.execute("SELECT pg_get_serial_sequence(%s, %s)", (table_name, "id"))
+            row = c.fetchone()
+            seq_name = row[0] if row else None
+            if not seq_name:
+                continue
+
+            c.execute(
+                f"""
+                SELECT setval(
+                    pg_get_serial_sequence(%s, %s),
+                    COALESCE(MAX({_quote_identifier('id')}), 1),
+                    MAX({_quote_identifier('id')}) IS NOT NULL
+                )
+                FROM {_quote_identifier(table_name)}
+                """,
+                (table_name, "id"),
+            )
+        except Exception as e:
+            logger.warning(f"Falha ao sincronizar sequência da tabela {table_name}: {e}")
 
 # ============ FUNÇÕES DE SEGURANÇA (BCRYPT) ============
 
@@ -65,23 +117,24 @@ def check_password(senha: str, hash_senha: str) -> bool:
 
 def init_db():
     """Inicializa o banco de dados com todas as tabelas necessárias"""
-    # Verificar integridade e recuperar se necessário
-    try:
-        with sqlite3.connect(str(DB_PATH), timeout=10) as test_conn:
-            test_conn.execute("PRAGMA integrity_check")
-            test_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-    except sqlite3.DatabaseError as e:
-        logger.error(f"Banco corrompido detectado: {e}. Tentando recuperação...")
+    if DB_BACKEND == "sqlite":
+        # Verificar integridade e recuperar se necessário
         try:
-            # Tentar recuperação via dump
-            import os
-            backup_path = str(DB_PATH) + ".corrupted_backup"
-            if Path(DB_PATH).exists():
-                os.rename(str(DB_PATH), backup_path)
-                logger.info(f"Banco corrompido movido para {backup_path}")
-            # O banco será recriado abaixo
-        except Exception as recovery_error:
-            logger.error(f"Erro na recuperação: {recovery_error}")
+            with sqlite3.connect(str(DB_PATH), timeout=10) as test_conn:
+                test_conn.execute("PRAGMA integrity_check")
+                test_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except sqlite3.DatabaseError as e:
+            logger.error(f"Banco corrompido detectado: {e}. Tentando recuperação...")
+            try:
+                # Tentar recuperação via dump
+                import os
+                backup_path = str(DB_PATH) + ".corrupted_backup"
+                if Path(DB_PATH).exists():
+                    os.rename(str(DB_PATH), backup_path)
+                    logger.info(f"Banco corrompido movido para {backup_path}")
+                # O banco será recriado abaixo
+            except Exception as recovery_error:
+                logger.error(f"Erro na recuperação: {recovery_error}")
     
     # Cria o esquema compatível com o dump histórico (pilotos com 'equipe', provas com 'horario_prova' e 'tipo', resultados com 'posicoes')
     with db_connect() as conn:
@@ -181,6 +234,10 @@ def init_db():
 
         # Inicializar regras
         init_rules_table()
+
+        # Hardening PostgreSQL: evita colisões de PK após importações/restaurações prévias.
+        _sync_postgres_sequences(conn)
+
         conn.commit()
         _get_existing_columns_cached.cache_clear()
         logger.info("✓ Banco de dados inicializado com sucesso")
@@ -337,7 +394,7 @@ def get_participantes_temporada_df(temporada: Optional[str] = None) -> pd.DataFr
     cols = _get_existing_columns('usuarios')
     cols_sql = ', '.join(_quote_identifier(c) for c in cols)
     with db_connect() as conn:
-        if not _usuarios_status_historico_exists(conn):
+        def _fallback_status_atual() -> pd.DataFrame:
             if 'status' in cols:
                 return pd.read_sql_query(
                     f"""
@@ -349,15 +406,30 @@ def get_participantes_temporada_df(temporada: Optional[str] = None) -> pd.DataFr
                 )
             return pd.read_sql_query(f"SELECT {cols_sql} FROM usuarios", conn)
 
+        if not _usuarios_status_historico_exists(conn):
+            return _fallback_status_atual()
+
+        # Se existir tabela mas sem registros, usa status atual para evitar falso vazio.
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM usuarios_status_historico")
+        historico_count = int(c.fetchone()[0] or 0)
+        if historico_count == 0:
+            return _fallback_status_atual()
+
         query = f"""
             SELECT DISTINCT {', '.join(f'u.{_quote_identifier(c)}' for c in cols)}
             FROM usuarios u
             JOIN usuarios_status_historico h ON h.usuario_id = u.id
                         WHERE lower(trim(coalesce(h.status, ''))) = 'ativo'
-              AND datetime(h.inicio_em) <= datetime(?)
-              AND (h.fim_em IS NULL OR datetime(h.fim_em) >= datetime(?))
+              AND h.inicio_em <= ?
+              AND (h.fim_em IS NULL OR h.fim_em >= ?)
         """
-        return pd.read_sql_query(query, conn, params=(season_end, season_start))
+        df_hist = pd.read_sql_query(query, conn, params=(season_end, season_start))
+        if not df_hist.empty:
+            return df_hist
+
+        # Fallback defensivo: se não houver match sazonal no histórico, usa status atual.
+        return _fallback_status_atual()
 
 
 def get_usuario_temporadas_ativas(user_id: int) -> list[str]:
@@ -399,8 +471,8 @@ def get_usuario_temporadas_ativas(user_id: int) -> list[str]:
             ) s
             JOIN usuarios_status_historico h ON h.usuario_id = ?
             WHERE LOWER(TRIM(COALESCE(h.status, ''))) = 'ativo'
-              AND DATETIME(h.inicio_em) <= DATETIME(s.temporada || '-12-31 23:59:59')
-              AND (h.fim_em IS NULL OR DATETIME(h.fim_em) >= DATETIME(s.temporada || '-01-01 00:00:00'))
+                            AND h.inicio_em <= (s.temporada || '-12-31 23:59:59')
+                            AND (h.fim_em IS NULL OR h.fim_em >= (s.temporada || '-01-01 00:00:00'))
             ORDER BY s.temporada
             """,
             conn,

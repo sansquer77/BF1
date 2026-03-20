@@ -21,6 +21,9 @@ __all__ = ['hash_password', 'check_password', 'autenticar_usuario', 'generate_to
 
 logger = logging.getLogger(__name__)
 
+_COOKIE_MANAGER_INSTANCE = None
+_COOKIE_MANAGER_KEY = "bf1_auth_cookie_manager"
+
 
 class _FallbackCookieManager:
     """Fallback simples quando extra_streamlit_components não está instalado."""
@@ -41,9 +44,15 @@ class _FallbackCookieManager:
 
 
 def _get_cookie_manager():
+    global _COOKIE_MANAGER_INSTANCE
+    if _COOKIE_MANAGER_INSTANCE is not None:
+        return _COOKIE_MANAGER_INSTANCE
+
     if stx is not None:
-        return stx.CookieManager()
-    return _FallbackCookieManager()
+        _COOKIE_MANAGER_INSTANCE = stx.CookieManager(key=_COOKIE_MANAGER_KEY)
+    else:
+        _COOKIE_MANAGER_INSTANCE = _FallbackCookieManager()
+    return _COOKIE_MANAGER_INSTANCE
 
 # ============ CONFIGURAÇÃO JWT ============
 # JWT_SECRET DEVE ser configurado via st.secrets ou variável de ambiente

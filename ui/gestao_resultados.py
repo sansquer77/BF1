@@ -4,6 +4,7 @@ import ast
 
 from db.db_utils import db_connect, get_provas_df, get_pilotos_df, get_resultados_df
 from services.bets_service import atualizar_classificacoes_todas_as_provas
+from utils.helpers import render_page_header
 from utils.season_utils import get_current_year_str, get_default_season_index, get_season_options
 
 def resultados_view():
@@ -12,7 +13,7 @@ def resultados_view():
         st.warning("Acesso restrito a administradores/master.")
         return
 
-    st.title("Atualizar Resultado Manualmente")
+    render_page_header(st, "Atualizar Resultado Manualmente")
 
     # Seletor de temporada
     current_year_str = get_current_year_str()
@@ -116,7 +117,6 @@ def resultados_view():
     abandono_pilotos = st.multiselect(
         "Selecione todos os pilotos que abandonaram",
         abandono_opcoes,
-        default=abandonos_existentes,
         key="res_abandonos"
     )
 
@@ -220,6 +220,6 @@ def resultados_view():
                 linha["Abandonos"] = res.iloc[0].get('abandono_pilotos', '')
             provas_resultados.append(linha)
     if provas_resultados:
-        st.dataframe(pd.DataFrame(provas_resultados))
+        st.dataframe(pd.DataFrame(provas_resultados), width="stretch")
     else:
         st.info("Nenhum resultado cadastrado ainda.")
