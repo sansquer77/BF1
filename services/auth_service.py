@@ -21,6 +21,8 @@ __all__ = ['hash_password', 'check_password', 'autenticar_usuario', 'generate_to
 
 logger = logging.getLogger(__name__)
 
+JWT_MIN_SECRET_BYTES = 32
+
 _COOKIE_MANAGER_INSTANCE = None
 _COOKIE_MANAGER_KEY = "bf1_auth_cookie_manager"
 
@@ -60,17 +62,34 @@ def _get_cookie_manager():
 
 def _get_jwt_secret() -> str:
     """Obtém JWT_SECRET de forma segura. Lança erro se não configurado em produção."""
-    secret = None
-    
-    # Tentar obter de st.secrets primeiro
+    secret_from_env = (os.environ.get("JWT_SECRET") or "").strip()
+    secret_from_streamlit = ""
+
+    # Tentar obter de st.secrets (sem assumir que existe em runtime)
     try:
-        secret = st.secrets.get("JWT_SECRET")
+        secret_from_streamlit = str(st.secrets.get("JWT_SECRET") or "").strip()
     except (FileNotFoundError, KeyError, AttributeError):
         pass
-    
-    # Fallback para variável de ambiente
-    if not secret:
-        secret = os.environ.get("JWT_SECRET")
+
+    # Prioridade: variável de ambiente (DigitalOcean) > st.secrets.
+    # Se a primeira opção estiver fraca e a segunda forte, usa a forte.
+    env_len = len(secret_from_env.encode("utf-8")) if secret_from_env else 0
+    st_len = len(secret_from_streamlit.encode("utf-8")) if secret_from_streamlit else 0
+
+    secret = ""
+    secret_source = "none"
+    if secret_from_env and env_len >= JWT_MIN_SECRET_BYTES:
+        secret = secret_from_env
+        secret_source = "env"
+    elif secret_from_streamlit and st_len >= JWT_MIN_SECRET_BYTES:
+        secret = secret_from_streamlit
+        secret_source = "st.secrets"
+    elif secret_from_env:
+        secret = secret_from_env
+        secret_source = "env"
+    elif secret_from_streamlit:
+        secret = secret_from_streamlit
+        secret_source = "st.secrets"
     
     # Verificar se está em ambiente de produção (Digital Ocean / Streamlit Cloud)
     is_production = (
@@ -94,6 +113,20 @@ def _get_jwt_secret() -> str:
             "Este é um valor obrigatório que deve ser definido ANTES do deployment.\n"
             "Configure em: Digital Ocean > App Settings > Environment Variables > JWT_SECRET"
         )
+
+    secret_len_bytes = len(secret.encode("utf-8"))
+    logger.info(f"JWT_SECRET carregado de {secret_source} com {secret_len_bytes} bytes")
+    if secret_len_bytes < JWT_MIN_SECRET_BYTES:
+        msg = (
+            "ERRO CRÍTICO DE SEGURANÇA: JWT_SECRET muito curto para HS256. "
+            f"Atual: {secret_len_bytes} bytes, mínimo recomendado: {JWT_MIN_SECRET_BYTES} bytes. "
+            "Gere um segredo forte (>=32 bytes) e atualize em Digital Ocean > App Settings > Environment Variables > JWT_SECRET"
+        )
+        if is_production:
+            logger.critical(msg)
+            raise RuntimeError(msg)
+
+        logger.warning(msg)
     return secret
 
 JWT_SECRET = _get_jwt_secret()
@@ -211,18 +244,12 @@ def set_auth_cookies(token, expires_minutes=JWT_EXP_MINUTES):
 def clear_auth_cookies():
     cookie_manager = _get_cookie_manager()
     try:
-        cookies = cookie_manager.get_all()
-        if isinstance(cookies, dict) and "session_token" not in cookies:
-            return
-    except Exception:
-        # If cookie listing fails, still attempt deletion below.
-        pass
-
-    try:
         cookie_manager.delete("session_token")
     except KeyError:
         # extra_streamlit_components can raise KeyError when cookie is absent.
         pass
+    except Exception as exc:
+        logger.warning("Falha ao limpar cookie de sessao: %s", exc)
 
 
 def get_auth_cookie_token():
