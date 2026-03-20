@@ -13,47 +13,15 @@ from email.mime.text import MIMEText
 
 logger = logging.getLogger(__name__)
 
-# Tentar obter credenciais de email de secrets ou environment variables
-try:
-    EMAIL_REMETENTE_RAW: Optional[str] = st.secrets.get("EMAIL_REMETENTE")
-except (FileNotFoundError, KeyError):
-    EMAIL_REMETENTE_RAW = None
-
-try:
-    SENHA_REMETENTE_RAW: Optional[str] = st.secrets.get("SENHA_EMAIL")
-except (FileNotFoundError, KeyError):
-    SENHA_REMETENTE_RAW = None
-
-if not SENHA_REMETENTE_RAW:
-    try:
-        SENHA_REMETENTE_RAW = st.secrets.get("SENHA_REMETENTE")
-    except (FileNotFoundError, KeyError):
-        SENHA_REMETENTE_RAW = None
-
-try:
-    EMAIL_ADMIN_RAW: Optional[str] = st.secrets.get("EMAIL_ADMIN")
-except (FileNotFoundError, KeyError):
-    EMAIL_ADMIN_RAW = None
-
-try:
-    PERPLEXITY_API_KEY_RAW: Optional[str] = st.secrets.get("PERPLEXITY_API_KEY")
-except (FileNotFoundError, KeyError):
-    PERPLEXITY_API_KEY_RAW = None
-
-try:
-    PERPLEXITY_MODEL_RAW: Optional[str] = st.secrets.get("PERPLEXITY_MODEL")
-except (FileNotFoundError, KeyError):
-    PERPLEXITY_MODEL_RAW = None
-
-EMAIL_REMETENTE: str = EMAIL_REMETENTE_RAW or os.environ.get("EMAIL_REMETENTE", "")
+# Configuração apenas por variáveis de ambiente (DigitalOcean/App Platform)
+EMAIL_REMETENTE: str = os.environ.get("EMAIL_REMETENTE", "")
 SENHA_REMETENTE: str = (
-    SENHA_REMETENTE_RAW
-    or os.environ.get("SENHA_EMAIL", "")
+    os.environ.get("SENHA_EMAIL", "")
     or os.environ.get("SENHA_REMETENTE", "")
 )
-EMAIL_ADMIN: str = EMAIL_ADMIN_RAW or os.environ.get("EMAIL_ADMIN", "")
-PERPLEXITY_API_KEY: str = PERPLEXITY_API_KEY_RAW or os.environ.get("PERPLEXITY_API_KEY", "")
-PERPLEXITY_MODEL: str = PERPLEXITY_MODEL_RAW or os.environ.get("PERPLEXITY_MODEL", "sonar")
+EMAIL_ADMIN: str = os.environ.get("EMAIL_ADMIN", "")
+PERPLEXITY_API_KEY: str = os.environ.get("PERPLEXITY_API_KEY", "")
+PERPLEXITY_MODEL: str = os.environ.get("PERPLEXITY_MODEL", "sonar")
 
 
 def _gerar_previsao_fallback(nome_usuario: str, nome_prova: str, pilotos: list[str], fichas: list[int], piloto_11: str) -> str:

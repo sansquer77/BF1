@@ -630,15 +630,8 @@ def _gerar_aposta_perplexity(
 
     api_key = ""
     model = "sonar"
-    try:
-        api_key = st.secrets.get("PERPLEXITY_API_KEY", "")
-        model = st.secrets.get("PERPLEXITY_MODEL", "sonar")
-    except Exception:
-        pass
-    if not api_key:
-        api_key = os.environ.get("PERPLEXITY_API_KEY", "")
-    if not model:
-        model = os.environ.get("PERPLEXITY_MODEL", "sonar")
+    api_key = os.environ.get("PERPLEXITY_API_KEY", "")
+    model = os.environ.get("PERPLEXITY_MODEL", "sonar")
     if not api_key:
         return None
 

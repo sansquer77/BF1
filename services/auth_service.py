@@ -57,39 +57,24 @@ def _get_cookie_manager():
     return _COOKIE_MANAGER_INSTANCE
 
 # ============ CONFIGURAÇÃO JWT ============
-# JWT_SECRET DEVE ser configurado via st.secrets ou variável de ambiente
+# JWT_SECRET DEVE ser configurado via variável de ambiente
 # Em produção, NUNCA usar fallback hardcoded
 
 def _get_jwt_secret() -> str:
     """Obtém JWT_SECRET de forma segura. Lança erro se não configurado em produção."""
     secret_from_env = (os.environ.get("JWT_SECRET") or "").strip()
-    secret_from_streamlit = ""
 
-    # Tentar obter de st.secrets (sem assumir que existe em runtime)
-    try:
-        secret_from_streamlit = str(st.secrets.get("JWT_SECRET") or "").strip()
-    except (FileNotFoundError, KeyError, AttributeError):
-        pass
-
-    # Prioridade: variável de ambiente (DigitalOcean) > st.secrets.
-    # Se a primeira opção estiver fraca e a segunda forte, usa a forte.
+    # Ambiente DigitalOcean/App Platform usa variável de ambiente.
     env_len = len(secret_from_env.encode("utf-8")) if secret_from_env else 0
-    st_len = len(secret_from_streamlit.encode("utf-8")) if secret_from_streamlit else 0
 
     secret = ""
     secret_source = "none"
     if secret_from_env and env_len >= JWT_MIN_SECRET_BYTES:
         secret = secret_from_env
         secret_source = "env"
-    elif secret_from_streamlit and st_len >= JWT_MIN_SECRET_BYTES:
-        secret = secret_from_streamlit
-        secret_source = "st.secrets"
     elif secret_from_env:
         secret = secret_from_env
         secret_source = "env"
-    elif secret_from_streamlit:
-        secret = secret_from_streamlit
-        secret_source = "st.secrets"
     
     # Verificar se está em ambiente de produção (Digital Ocean / Streamlit Cloud)
     is_production = (
@@ -103,7 +88,7 @@ def _get_jwt_secret() -> str:
             logger.critical("JWT_SECRET não configurado em ambiente de produção!")
             raise RuntimeError(
                 "ERRO CRÍTICO DE SEGURANÇA: JWT_SECRET não está configurado. "
-                "Configure a variável de ambiente JWT_SECRET ou adicione em st.secrets."
+                "Configure a variável de ambiente JWT_SECRET."
             )
         
         # 🔴 ERRO CRÍTICO - JWT_SECRET SEMPRE OBRIGATÓRIO
@@ -295,14 +280,8 @@ def redefinir_senha_usuario(email: str):
 
 # --- CRIAÇÃO AUTOMÁTICA DO MASTER ---
 def _get_secret_value(*keys):
-    """Busca valor em múltiplas chaves (maiúscula/minúscula) em st.secrets e os.environ"""
+    """Busca valor em múltiplas chaves (maiúscula/minúscula) no os.environ."""
     for key in keys:
-        try:
-            value = st.secrets.get(key)
-            if value:
-                return value
-        except:
-            pass
         value = os.environ.get(key)
         if value:
             return value
