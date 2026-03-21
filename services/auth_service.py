@@ -22,6 +22,7 @@ __all__ = ['hash_password', 'check_password', 'autenticar_usuario', 'generate_to
 logger = logging.getLogger(__name__)
 
 JWT_MIN_SECRET_BYTES = 32
+_JWT_SECRET_LOGGED = False
 
 _COOKIE_MANAGER_INSTANCE = None
 _COOKIE_MANAGER_KEY = "bf1_auth_cookie_manager"
@@ -62,6 +63,7 @@ def _get_cookie_manager():
 
 def _get_jwt_secret() -> str:
     """Obtém JWT_SECRET de forma segura. Lança erro se não configurado em produção."""
+    global _JWT_SECRET_LOGGED
     secret_from_env = (os.environ.get("JWT_SECRET") or "").strip()
 
     # Ambiente DigitalOcean/App Platform usa variável de ambiente.
@@ -100,7 +102,9 @@ def _get_jwt_secret() -> str:
         )
 
     secret_len_bytes = len(secret.encode("utf-8"))
-    logger.info(f"JWT_SECRET carregado de {secret_source} com {secret_len_bytes} bytes")
+    if not _JWT_SECRET_LOGGED:
+        logger.info(f"JWT_SECRET carregado de {secret_source} com {secret_len_bytes} bytes")
+        _JWT_SECRET_LOGGED = True
     if secret_len_bytes < JWT_MIN_SECRET_BYTES:
         msg = (
             "ERRO CRÍTICO DE SEGURANÇA: JWT_SECRET muito curto para HS256. "
@@ -114,6 +118,7 @@ def _get_jwt_secret() -> str:
         logger.warning(msg)
     return secret
 
+# Validação no startup para falhar cedo em configuração inválida.
 JWT_SECRET = _get_jwt_secret()
 JWT_EXP_MINUTES = 120
 
@@ -131,6 +136,7 @@ def autenticar_usuario(email: str, senha: str):
 # --- GERAÇÃO E DECODIFICAÇÃO DE TOKEN JWT ---
 def generate_token(user_id: int, nome: str, perfil: str, status: str) -> str:
     """Gera um JWT para o usuário autenticado, incluindo o nome."""
+    jwt_secret = _get_jwt_secret()
     payload = {
         "user_id": user_id,
         "nome": nome,
@@ -138,7 +144,7 @@ def generate_token(user_id: int, nome: str, perfil: str, status: str) -> str:
         "status": status,
         "exp": datetime.now(timezone.utc) + timedelta(minutes=JWT_EXP_MINUTES)
     }
-    token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+    token = jwt.encode(payload, jwt_secret, algorithm="HS256")
     if isinstance(token, bytes):
         token = token.decode("utf-8")
     return token
@@ -146,7 +152,8 @@ def generate_token(user_id: int, nome: str, perfil: str, status: str) -> str:
 def decode_token(token: str):
     """Decodifica e valida um JWT; retorna o payload, ou None se inválido/expirado."""
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        jwt_secret = _get_jwt_secret()
+        payload = jwt.decode(token, jwt_secret, algorithms=["HS256"])
         return payload
     except jwt.ExpiredSignatureError:
         return None
