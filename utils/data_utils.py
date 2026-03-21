@@ -566,8 +566,18 @@ def get_frequencia_11_por_piloto(seasons: Optional[list[str]] = None) -> dict[st
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def get_taxa_dnf_por_piloto(season: str = 'current', n_corridas: int = 8) -> dict[str, float]:
-    """Retorna taxa de DNF recente por piloto: {nome_normalizado: taxa_0_a_1}."""
+def get_taxa_dnf_por_piloto(
+    season: str = 'current',
+    n_corridas: int = 8,
+    usar_suavizacao: bool = True,
+    prior_corridas: int = 4,
+    prior_taxa_dnf: float = 0.18,
+) -> dict[str, float]:
+    """Retorna taxa de DNF recente por piloto: {nome_normalizado: taxa_0_a_1}.
+
+    Quando usar_suavizacao=True, aplica prior bayesiano para reduzir extremos no início da temporada:
+      taxa = (dnf_observado + prior_corridas * prior_taxa_dnf) / (corridas_observadas + prior_corridas)
+    """
     season_val = _resolve_season(season)
     data = _request_json(f"{BASE_URL}/{season_val}/results.json?limit=2000")
     if not data:
@@ -609,5 +619,12 @@ def get_taxa_dnf_por_piloto(season: str = 'current', n_corridas: int = 8) -> dic
     out: dict[str, float] = {}
     for name, total in total_partidas.items():
         if total > 0:
-            out[name] = float(total_dnf.get(name, 0)) / float(total)
+            dnf_obs = float(total_dnf.get(name, 0))
+            if usar_suavizacao and prior_corridas > 0:
+                prior_taxa = max(0.0, min(1.0, float(prior_taxa_dnf)))
+                numerador = dnf_obs + (float(prior_corridas) * prior_taxa)
+                denominador = float(total) + float(prior_corridas)
+                out[name] = numerador / denominador
+            else:
+                out[name] = dnf_obs / float(total)
     return out

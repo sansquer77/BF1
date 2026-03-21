@@ -483,14 +483,14 @@ def _estimar_pontos_aposta_ergast(
             row = [v / s for v in row]
         prob_por_piloto.append(row)
 
-    # Escolhe posição única por piloto maximizando (pontos * fichas * prob)
+    # Escolhe posição única por piloto maximizando probabilidade (1 piloto por posição).
+    # A pontuação estimada é calculada depois como fichas * pontos_da_posicao_escolhida.
     pilotos_top = pilotos_validos[:n_pos]
     probs_top = prob_por_piloto[:n_pos]
     m = len(pilotos_top)
 
     dp: dict[tuple[int, int], tuple[float, list[int]]] = {(0, 0): (0.0, [])}
     for i in range(m):
-        ficha_i = pilotos_top[i][1]
         novo_dp: dict[tuple[int, int], tuple[float, list[int]]] = {}
         for (idx, mask), (score, escolha) in dp.items():
             if idx != i:
@@ -500,7 +500,7 @@ def _estimar_pontos_aposta_ergast(
                 if mask & bit:
                     continue
                 p = probs_top[i][pos0]
-                ganho = float(pontos_lista[pos0]) * float(ficha_i) * p
+                ganho = p
                 chave = (i + 1, mask | bit)
                 atual = novo_dp.get(chave)
                 candidato = (score + ganho, escolha + [pos0 + 1])
@@ -538,12 +538,12 @@ def _estimar_pontos_aposta_ergast(
                 dnf_rate = float(dnf.get(nome_key, 0.0) or 0.0)
             except Exception:
                 dnf_rate = 0.0
-        fator_conclusao = 1.0 - _clamp(dnf_rate, 0.0, 0.8)
-        pontos_estimados += float(pontos_lista[pos_sel - 1]) * float(ficha_i) * prob_sel * fator_conclusao
+        fator_dnf = 1.0 - _clamp(dnf_rate, 0.0, 1.0)
+        pontos_estimados += float(pontos_lista[pos_sel - 1]) * float(ficha_i) * fator_dnf
         probs_escolhidas.append((prob_sel, ficha_i))
         probs_media_simples.append(prob_sel)
         detalhes_linhas.append(
-            f"{piloto}: ficha={ficha_i}, pos~{pos_sel}, p={prob_sel:.3f}, dnf={dnf_rate:.2f}"
+            f"{piloto}: ficha={ficha_i}, pos~{pos_sel}, p={prob_sel:.3f}, dnf={dnf_rate:.2f}, fator_dnf={fator_dnf:.2f}"
         )
 
     bonus_11 = float(regras.get("pontos_11_colocado", 25) or 25)
