@@ -299,6 +299,35 @@ def _normalizar_data_horario_log(data_val: object, horario_val: object) -> tuple
     return dt_obj.date().isoformat(), dt_obj.strftime("%H:%M:%S")
 
 
+def _extrair_horario_hhmmss(valor: object) -> Optional[str]:
+    """Extrai HH:MM:SS de diversos formatos (hora pura, ISO, epoch numérico)."""
+    if valor is None:
+        return None
+    txt = str(valor).strip()
+    if not txt:
+        return None
+    if re.fullmatch(r"\d{2}:\d{2}:\d{2}", txt):
+        return txt
+
+    data_norm, hora_norm = _normalizar_data_horario_log(None, txt)
+    _ = data_norm
+    return hora_norm
+
+
+def _formatar_horario_para_armazenamento(data_iso: Optional[str], horario_hhmmss: Optional[str]) -> Optional[str]:
+    """Formata valor de `horario` compatível com backend.
+
+    - SQLite: armazena HH:MM:SS
+    - PostgreSQL (coluna TIMESTAMP): armazena YYYY-MM-DD HH:MM:SS
+    """
+    if not horario_hhmmss:
+        return None
+    if DB_BACKEND == "postgres":
+        base_date = data_iso if data_iso and re.fullmatch(r"\d{4}-\d{2}-\d{2}", data_iso) else "1970-01-01"
+        return f"{base_date} {horario_hhmmss}"
+    return horario_hhmmss
+
+
 def sanitize_log_apostas_horario(conn=None) -> int:
     """Saneia valores legados em log_apostas para manter horario no formato HH:MM:SS.
 
@@ -338,9 +367,13 @@ def sanitize_log_apostas_horario(conn=None) -> int:
                 continue
 
             data_old_str = str(data_old).strip() if data_old is not None else ""
-            horario_old_str = str(horario_old).strip() if horario_old is not None else ""
+            horario_old_hhmmss = _extrair_horario_hhmmss(horario_old)
+            horario_store = _formatar_horario_para_armazenamento(data_new, horario_new)
 
-            mudou_hora = horario_new != horario_old_str
+            mudou_hora = horario_store != (str(horario_old).strip() if horario_old is not None else "")
+            # Se no banco já está timestamp completo equivalente ao mesmo HH:MM:SS, não precisa atualizar.
+            if not mudou_hora and horario_old_hhmmss == horario_new:
+                mudou_hora = False
             mudou_data = has_data and (data_new is not None) and (data_new != data_old_str)
 
             if not mudou_hora and not mudou_data:
@@ -349,12 +382,12 @@ def sanitize_log_apostas_horario(conn=None) -> int:
             if has_data and data_new is not None:
                 c.execute(
                     "UPDATE log_apostas SET data = ?, horario = ? WHERE id = ?",
-                    (data_new, horario_new, row_id),
+                    (data_new, horario_store, row_id),
                 )
             else:
                 c.execute(
                     "UPDATE log_apostas SET horario = ? WHERE id = ?",
-                    (horario_new, row_id),
+                    (horario_store, row_id),
                 )
             atualizados += 1
 
@@ -774,7 +807,8 @@ def registrar_log_aposta(*args, **kwargs):
 
                 if dt_obj is not None:
                     data_str = dt_obj.date().isoformat()
-                    horario_str = dt_obj.strftime('%H:%M:%S')
+                    horario_hhmmss = dt_obj.strftime('%H:%M:%S')
+                    horario_str = _formatar_horario_para_armazenamento(data_str, horario_hhmmss)
                 else:
                     # Fallback conservador: não grava valor fora do padrão de hora.
                     data_str = datetime.datetime.now().date().isoformat()
