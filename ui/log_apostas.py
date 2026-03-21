@@ -11,6 +11,45 @@ logger = logging.getLogger(__name__)
 def _table_height(total_rows: int, row_height: int = 36, max_height: int = 620) -> int:
     return min(max_height, 42 + (max(total_rows, 1) * row_height))
 
+
+def _formatar_horario_hhmmss(valor: object) -> str:
+    """Normaliza diferentes representações de horário para HH:MM:SS."""
+    if valor is None or (isinstance(valor, float) and pd.isna(valor)):
+        return ""
+
+    # Caso já venha em string de hora simples
+    txt = str(valor).strip()
+    if not txt:
+        return ""
+    if len(txt) == 8 and txt.count(":") == 2:
+        return txt
+
+    # Tenta parse de ISO/texto padrão
+    dt = pd.to_datetime(txt, errors="coerce")
+    if not pd.isna(dt):
+        return dt.strftime("%H:%M:%S")
+
+    # Tenta parse numérico (epoch em s/ms/us/ns)
+    try:
+        num = float(txt)
+    except Exception:
+        return txt
+
+    abs_num = abs(num)
+    if abs_num >= 1e18:
+        unit = "ns"
+    elif abs_num >= 1e15:
+        unit = "us"
+    elif abs_num >= 1e12:
+        unit = "ms"
+    else:
+        unit = "s"
+
+    dt_num = pd.to_datetime(num, unit=unit, errors="coerce")
+    if pd.isna(dt_num):
+        return txt
+    return dt_num.strftime("%H:%M:%S")
+
 def carregar_logs(temporada=None, usuario_id=None, is_admin=False):
     """Carrega logs de apostas, opcionalmente filtrando por temporada"""
     with db_connect() as conn:
@@ -124,6 +163,9 @@ def main():
         return
 
     filtro_show = filtro.copy()
+    if "horario" in filtro_show.columns:
+        filtro_show["horario"] = filtro_show["horario"].apply(_formatar_horario_hhmmss)
+
     filtro_show["Tipo de Aposta"] = filtro["tipo_aposta"].map(tipos_map)
     filtro_show["Automática"] = filtro["automatica"].apply(lambda x: "Sim" if x > 0 else "Não")
     if "pilotos" in filtro_show.columns:
