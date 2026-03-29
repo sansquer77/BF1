@@ -53,14 +53,16 @@ def _formatar_horario_hhmmss(valor: object) -> str:
 def carregar_logs(temporada=None, usuario_id=None, usuario_nome=None, is_admin=False):
     """Carrega logs de apostas, opcionalmente filtrando por temporada"""
     with db_connect() as conn:
-        cols_info = pd.read_sql("PRAGMA table_info(log_apostas)", conn)
-        has_status = "status" in cols_info["name"].values if not cols_info.empty else False
-        has_ip_address = "ip_address" in cols_info["name"].values if not cols_info.empty else False
-        has_usuario_id = "usuario_id" in cols_info["name"].values if not cols_info.empty else False
-        has_user_id = "user_id" in cols_info["name"].values if not cols_info.empty else False
-        has_temporada = "temporada" in cols_info["name"].values if not cols_info.empty else False
-        has_data = "data" in cols_info["name"].values if not cols_info.empty else False
-        has_data_criacao = "data_criacao" in cols_info["name"].values if not cols_info.empty else False
+        c = conn.cursor()
+        c.execute("PRAGMA table_info('log_apostas')")
+        cols = [str(r[1]) for r in c.fetchall()]
+        has_status = "status" in cols
+        has_ip_address = "ip_address" in cols
+        has_usuario_id = "usuario_id" in cols
+        has_user_id = "user_id" in cols
+        has_temporada = "temporada" in cols
+        has_data = "data" in cols
+        has_data_criacao = "data_criacao" in cols
         user_col = "usuario_id" if has_usuario_id else ("user_id" if has_user_id else None)
         status_expr = "status" if has_status else "'Registrada' AS status"
         ip_expr = "ip_address" if has_ip_address else "NULL AS ip_address"
