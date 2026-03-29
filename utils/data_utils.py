@@ -445,42 +445,51 @@ def _normalize_race_name(race_name: str) -> str:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_circuit_id_por_nome_prova(season: str, nome_prova: str) -> Optional[str]:
-    """Resolve circuitId a partir do nome da prova na temporada."""
+    """Resolve circuitId pelo vínculo direto salvo em `provas.circuit_id`."""
     season_val = _resolve_season(season)
-    data = _request_json(f"{BASE_URL}/{season_val}.json")
-    if not data:
-        return None
-
-    try:
-        races = data['MRData']['RaceTable'].get('Races', [])
-    except (KeyError, TypeError):
-        return None
-
-    if not races:
-        return None
-
     target = _normalize_race_name(nome_prova)
     if not target:
         return None
 
-    best_id = None
-    best_score = -1
-    target_tokens = set(target.split())
+    try:
+        from db.db_utils import db_connect
 
-    for race in races:
-        race_name = _normalize_race_name(str(race.get('raceName', '')))
-        if not race_name:
-            continue
-        race_tokens = set(race_name.split())
-        overlap = len(target_tokens.intersection(race_tokens))
-        exact_bonus = 100 if race_name == target else 0
-        contains_bonus = 10 if (target in race_name or race_name in target) else 0
-        score = overlap + exact_bonus + contains_bonus
-        if score > best_score:
-            best_score = score
-            best_id = race.get('Circuit', {}).get('circuitId')
+        with db_connect() as conn:
+            c = conn.cursor()
+            c.execute("PRAGMA table_info('provas')")
+            cols = [r[1] for r in c.fetchall()]
+            if 'circuit_id' not in cols or 'nome' not in cols:
+                return None
 
-    return str(best_id) if best_id else None
+            if 'temporada' in cols:
+                c.execute(
+                    """
+                    SELECT nome, circuit_id
+                    FROM provas
+                    WHERE (temporada = ? OR temporada IS NULL)
+                      AND circuit_id IS NOT NULL
+                      AND TRIM(circuit_id) <> ''
+                    """,
+                    (season_val,),
+                )
+            else:
+                c.execute(
+                    """
+                    SELECT nome, circuit_id
+                    FROM provas
+                    WHERE circuit_id IS NOT NULL
+                      AND TRIM(circuit_id) <> ''
+                    """
+                )
+
+            rows = c.fetchall() or []
+            for prova_nome, circuit_id in rows:
+                if _normalize_race_name(str(prova_nome)) == target:
+                    return str(circuit_id)
+    except Exception:
+        return None
+
+    return None
 
 
 @st.cache_data(ttl=3600, show_spinner=False)

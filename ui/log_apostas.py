@@ -96,13 +96,12 @@ def main():
         st.info("Sessão inválida ou expirada. Faça login novamente.")
         return
 
-    # Season selector - read from temporadas table
+    # Season selector - available for all profiles
     season_options = get_season_options(fallback_years=["2025", "2026"])
     if not season_options:
         st.info("Não há temporadas disponíveis para consulta no seu histórico de status.")
         return
     default_index = get_default_season_index(season_options)
-    
     season = st.selectbox("Temporada", season_options, index=default_index, key="log_apostas_season")
     st.session_state['temporada'] = season
 
