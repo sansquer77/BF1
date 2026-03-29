@@ -58,6 +58,9 @@ def carregar_logs(temporada=None, usuario_id=None, usuario_nome=None, is_admin=F
         has_ip_address = "ip_address" in cols_info["name"].values if not cols_info.empty else False
         has_usuario_id = "usuario_id" in cols_info["name"].values if not cols_info.empty else False
         has_user_id = "user_id" in cols_info["name"].values if not cols_info.empty else False
+        has_temporada = "temporada" in cols_info["name"].values if not cols_info.empty else False
+        has_data = "data" in cols_info["name"].values if not cols_info.empty else False
+        has_data_criacao = "data_criacao" in cols_info["name"].values if not cols_info.empty else False
         user_col = "usuario_id" if has_usuario_id else ("user_id" if has_user_id else None)
         status_expr = "status" if has_status else "'Registrada' AS status"
         ip_expr = "ip_address" if has_ip_address else "NULL AS ip_address"
@@ -67,21 +70,25 @@ def carregar_logs(temporada=None, usuario_id=None, usuario_nome=None, is_admin=F
         params = []
 
         if temporada:
-            where_clauses.append("(temporada = ? OR temporada IS NULL)")
-            params.append(temporada)
+            season_sources = []
+            if has_temporada:
+                season_sources.append("NULLIF(TRIM(CAST(temporada AS TEXT)), '')")
+            if has_data:
+                season_sources.append("NULLIF(SUBSTR(CAST(data AS TEXT), 1, 4), '')")
+            if has_data_criacao:
+                season_sources.append("NULLIF(SUBSTR(CAST(data_criacao AS TEXT), 1, 4), '')")
+
+            if season_sources:
+                season_expr = f"COALESCE({', '.join(season_sources)})"
+                where_clauses.append(f"{season_expr} = ?")
+                params.append(str(temporada).strip())
 
         if not is_admin:
             if not user_col or usuario_id is None:
                 return pd.DataFrame()
-            if usuario_nome and str(usuario_nome).strip():
-                where_clauses.append(
-                    f"({user_col} = ? OR ({user_col} IS NULL AND lower(trim(apostador)) = lower(trim(?))))"
-                )
-                params.append(int(usuario_id))
-                params.append(str(usuario_nome).strip())
-            else:
-                where_clauses.append(f"{user_col} = ?")
-                params.append(int(usuario_id))
+            # Para perfil participante, o vínculo oficial é sempre por ID do usuário.
+            where_clauses.append(f"{user_col} = ?")
+            params.append(int(usuario_id))
 
         where_sql = ""
         if where_clauses:
