@@ -50,16 +50,18 @@ def _formatar_horario_hhmmss(valor: object) -> str:
         return txt
     return dt_num.strftime("%H:%M:%S")
 
-def carregar_logs(temporada=None, usuario_id=None, is_admin=False):
+def carregar_logs(temporada=None, usuario_id=None, usuario_nome=None, is_admin=False):
     """Carrega logs de apostas, opcionalmente filtrando por temporada"""
     with db_connect() as conn:
         cols_info = pd.read_sql("PRAGMA table_info(log_apostas)", conn)
         has_status = "status" in cols_info["name"].values if not cols_info.empty else False
         has_ip_address = "ip_address" in cols_info["name"].values if not cols_info.empty else False
         has_usuario_id = "usuario_id" in cols_info["name"].values if not cols_info.empty else False
+        has_user_id = "user_id" in cols_info["name"].values if not cols_info.empty else False
+        user_col = "usuario_id" if has_usuario_id else ("user_id" if has_user_id else None)
         status_expr = "status" if has_status else "'Registrada' AS status"
         ip_expr = "ip_address" if has_ip_address else "NULL AS ip_address"
-        user_expr = "usuario_id" if has_usuario_id else "NULL AS usuario_id"
+        user_expr = f"{user_col} AS usuario_id" if user_col else "NULL AS usuario_id"
 
         where_clauses = []
         params = []
@@ -69,10 +71,17 @@ def carregar_logs(temporada=None, usuario_id=None, is_admin=False):
             params.append(temporada)
 
         if not is_admin:
-            if not has_usuario_id or usuario_id is None:
+            if not user_col or usuario_id is None:
                 return pd.DataFrame()
-            where_clauses.append("usuario_id = ?")
-            params.append(int(usuario_id))
+            if usuario_nome and str(usuario_nome).strip():
+                where_clauses.append(
+                    f"({user_col} = ? OR ({user_col} IS NULL AND lower(trim(apostador)) = lower(trim(?))))"
+                )
+                params.append(int(usuario_id))
+                params.append(str(usuario_nome).strip())
+            else:
+                where_clauses.append(f"{user_col} = ?")
+                params.append(int(usuario_id))
 
         where_sql = ""
         if where_clauses:
@@ -92,6 +101,7 @@ def main():
     perfil = st.session_state.get("user_role", "participante")
     is_admin = perfil in ("admin", "master")
     user_id = st.session_state.get("user_id")
+    user_nome = st.session_state.get("user_nome")
     if not is_admin and not user_id:
         st.info("Sessão inválida ou expirada. Faça login novamente.")
         return
@@ -105,7 +115,7 @@ def main():
     season = st.selectbox("Temporada", season_options, index=default_index, key="log_apostas_season")
     st.session_state['temporada'] = season
 
-    df = carregar_logs(season, usuario_id=user_id, is_admin=is_admin)
+    df = carregar_logs(season, usuario_id=user_id, usuario_nome=user_nome, is_admin=is_admin)
     if df.empty:
         st.warning("Nenhum registro no log de apostas.")
         return
