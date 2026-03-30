@@ -136,6 +136,7 @@ from ui.analysis import main as analysis_view
 from ui.regulamento import main as regulamento_view
 from ui.classificacao import main as classificacao_view
 from ui.log_apostas import main as log_apostas_view
+from ui.log_acessos import main as log_acessos_view
 from ui.gestao_provas import main as gestao_provas_view
 from ui.gestao_regras import main as gestao_regras_view
 from ui.gestao_pilotos import main as gestao_pilotos_view
@@ -169,6 +170,7 @@ def menu_master():
         "Apostas Campeonato",
         "Resultado Campeonato",
         "Log de Apostas",
+        "Log de Acessos",
         "Classificação",
         "Hall da Fama",
         "Dashboard F1",
@@ -231,6 +233,7 @@ ROLE_GUARDS = {
     "Gestão de Usuários": ("master",),
     "Gestão de Regras": ("master",),
     "Backup dos Bancos de Dados": ("master",),
+    "Log de Acessos": ("master",),
     "Gestão de Pilotos": ("admin", "master"),
     "Gestão de Provas": ("admin", "master"),
     "Gestão de Apostas": ("admin", "master"),
@@ -351,6 +354,7 @@ PAGES = {
     "Apostas Campeonato": championship_bets_view,
     "Resultado Campeonato": championship_results_view,
     "Log de Apostas": log_apostas_view,
+    "Log de Acessos": log_acessos_view,
     "Classificação": classificacao_view,
     "Hall da Fama": hall_da_fama,
     "Dashboard F1": dashboard_view,

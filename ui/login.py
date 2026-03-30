@@ -51,6 +51,44 @@ def registrar_tentativa_login(email: str, sucesso: bool, ip_address: str = "LOCA
         conn.commit()
 
 
+def registrar_evento_acesso(
+    *,
+    evento: str,
+    sucesso: bool,
+    ip_address: str,
+    email: str | None = None,
+    user_id: int | None = None,
+    nome: str | None = None,
+    perfil: str | None = None,
+    detalhes: str | None = None,
+) -> None:
+    """Registra evento de auditoria de acesso com dados completos para o Master."""
+    try:
+        with db_connect() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                '''
+                INSERT INTO access_logs (
+                    evento, sucesso, user_id, email, nome, perfil, ip_address, detalhes
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''',
+                (
+                    evento,
+                    bool(sucesso),
+                    user_id,
+                    email,
+                    nome,
+                    perfil,
+                    ip_address,
+                    detalhes,
+                ),
+            )
+            conn.commit()
+    except Exception as exc:
+        logger.warning("Falha ao registrar access_logs: %s", exc)
+
+
 def obter_tentativas_recentes(
     email: str,
     ip_address: str,
@@ -211,6 +249,16 @@ def login_view():
                     MAX_LOGIN_ATTEMPTS,
                     MAX_LOGIN_ATTEMPTS * 3,
                 )
+                registrar_evento_acesso(
+                    evento="login_bloqueado",
+                    sucesso=False,
+                    email=email,
+                    ip_address=client_ip,
+                    detalhes=(
+                        f"motivo={motivo};falhas_email={falhas};falhas_ip={falhas_ip};"
+                        f"limite_email={MAX_LOGIN_ATTEMPTS};limite_ip={MAX_LOGIN_ATTEMPTS * 3}"
+                    ),
+                )
                 registrar_tentativa_login(email, False, ip_address=client_ip, action="login")
                 return
             
@@ -220,6 +268,12 @@ def login_view():
             if not usuario:
                 st.error("❌ Email ou senha incorretos")
                 logger.warning("Tentativa de login com usuario inexistente: %s", redact_identifier(email))
+                registrar_evento_acesso(
+                    evento="login_usuario_inexistente",
+                    sucesso=False,
+                    email=email,
+                    ip_address=client_ip,
+                )
                 registrar_tentativa_login(email, False, ip_address=client_ip, action="login")
                 return
             
@@ -227,6 +281,16 @@ def login_view():
             if usuario['status'] != 'Ativo':
                 st.error(f"❌ Usuário inativo. Status: {usuario['status']}")
                 logger.warning("Tentativa de login com usuario inativo: %s", redact_identifier(email))
+                registrar_evento_acesso(
+                    evento="login_usuario_inativo",
+                    sucesso=False,
+                    user_id=usuario.get('id'),
+                    email=usuario.get('email', email),
+                    nome=usuario.get('nome'),
+                    perfil=usuario.get('perfil'),
+                    ip_address=client_ip,
+                    detalhes=f"status={usuario.get('status')}",
+                )
                 registrar_tentativa_login(email, False, ip_address=client_ip, action="login")
                 return
             
@@ -246,6 +310,15 @@ def login_view():
                     )
                 
                 logger.warning("Falha de autenticacao para: %s", redact_identifier(email))
+                registrar_evento_acesso(
+                    evento="login_senha_incorreta",
+                    sucesso=False,
+                    user_id=usuario.get('id'),
+                    email=usuario.get('email', email),
+                    nome=usuario.get('nome'),
+                    perfil=usuario.get('perfil'),
+                    ip_address=client_ip,
+                )
                 registrar_tentativa_login(email, False, ip_address=client_ip, action="login")
                 return
             
@@ -259,6 +332,16 @@ def login_view():
                 )
             except Exception as e:
                 logger.exception("Falha ao criar token JWT no login: %s", e)
+                registrar_evento_acesso(
+                    evento="login_erro_token",
+                    sucesso=False,
+                    user_id=usuario.get('id'),
+                    email=usuario.get('email', email),
+                    nome=usuario.get('nome'),
+                    perfil=usuario.get('perfil'),
+                    ip_address=client_ip,
+                    detalhes=str(e),
+                )
                 st.error("❌ Erro ao gerar token de autenticação.")
                 return
 
@@ -288,6 +371,15 @@ def login_view():
 
             # Registrar sucesso
             registrar_tentativa_login(email, True, ip_address=client_ip, action="login")
+            registrar_evento_acesso(
+                evento="login_sucesso",
+                sucesso=True,
+                user_id=usuario.get('id'),
+                email=usuario.get('email', email),
+                nome=usuario.get('nome'),
+                perfil=usuario.get('perfil'),
+                ip_address=client_ip,
+            )
 
             logger.info("Login bem-sucedido: %s perfil=%s", redact_identifier(email), usuario['perfil'])
 
