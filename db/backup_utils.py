@@ -141,6 +141,33 @@ def _extract_truncate_tables(statement: str) -> list[str] | None:
     return names
 
 
+def _extract_insert_table(statement: str) -> str | None:
+    match = re.match(r'^\s*INSERT\s+INTO\s+"?([A-Za-z_][A-Za-z0-9_]*)"?', statement, flags=re.IGNORECASE)
+    if not match:
+        return None
+    try:
+        return _sanitize_identifier(match.group(1))
+    except ValueError:
+        return None
+
+
+def _is_fk_violation_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return "violates foreign key constraint" in msg or "foreign key constraint" in msg
+
+
+def _execute_with_savepoint(cursor, statement: str) -> tuple[bool, Exception | None]:
+    cursor.execute("SAVEPOINT bf1_restore_stmt")
+    try:
+        cursor.execute(statement)
+        cursor.execute("RELEASE SAVEPOINT bf1_restore_stmt")
+        return True, None
+    except Exception as exc:
+        cursor.execute("ROLLBACK TO SAVEPOINT bf1_restore_stmt")
+        cursor.execute("RELEASE SAVEPOINT bf1_restore_stmt")
+        return False, exc
+
+
 def get_postgres_backup_mode() -> tuple[str, str]:
     pg_dump = _detect_cmd(("pg_dump", "pg_dump16", "pg_dump15", "pg_dump14"))
     if not pg_dump:
@@ -230,6 +257,8 @@ def restore_backup_from_sql(sql_content: str) -> bool:
         with db_connect() as conn:
             c = conn.cursor()
             existing_tables = {t.lower() for t in _list_tables()}
+            pending_fk_inserts: list[tuple[str, str]] = []
+
             for stmt in statements:
                 upper = stmt.upper()
                 if upper in {"BEGIN", "COMMIT", "ROLLBACK"}:
@@ -247,7 +276,51 @@ def restore_backup_from_sql(sql_content: str) -> bool:
                             + " RESTART IDENTITY CASCADE"
                         )
 
-                c.execute(stmt)
+                insert_table = _extract_insert_table(stmt)
+                if insert_table and insert_table.lower() not in existing_tables:
+                    # Data-only dumps podem referenciar tabelas removidas; ignora para não abortar restore.
+                    continue
+
+                ok_stmt, err_stmt = _execute_with_savepoint(c, stmt)
+                if ok_stmt:
+                    continue
+
+                if insert_table and err_stmt and _is_fk_violation_error(err_stmt):
+                    pending_fk_inserts.append((stmt, str(err_stmt)))
+                    continue
+
+                raise err_stmt if err_stmt else RuntimeError("Unknown restore statement error")
+
+            max_passes = max(2, len(existing_tables) + 1)
+            for _ in range(max_passes):
+                if not pending_fk_inserts:
+                    break
+
+                next_pending: list[tuple[str, str]] = []
+                progress = 0
+                for stmt, _last_error in pending_fk_inserts:
+                    ok_stmt, err_stmt = _execute_with_savepoint(c, stmt)
+                    if ok_stmt:
+                        progress += 1
+                        continue
+
+                    if err_stmt and _is_fk_violation_error(err_stmt):
+                        next_pending.append((stmt, str(err_stmt)))
+                        continue
+
+                    raise err_stmt if err_stmt else RuntimeError("Unknown restore statement error")
+
+                pending_fk_inserts = next_pending
+                if progress == 0:
+                    break
+
+            if pending_fk_inserts:
+                first_error = pending_fk_inserts[0][1]
+                raise RuntimeError(
+                    "Restore failed: unresolved foreign key dependencies in "
+                    f"{len(pending_fk_inserts)} INSERT statement(s). First error: {first_error}"
+                )
+
             conn.commit()
         return True
     except Exception as exc:
