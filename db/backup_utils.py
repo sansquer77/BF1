@@ -6,6 +6,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, unquote, urlparse
 
 import pandas as pd
 import streamlit as st
@@ -25,15 +26,22 @@ def _quote_identifier(identifier: str) -> str:
     return f'"{_sanitize_identifier(identifier)}"'
 
 
-def _run_command(args: list[str], sql_input: str | None = None) -> tuple[bool, str, str]:
+def _run_command(
+    args: list[str],
+    sql_input: str | None = None,
+    env_overrides: dict[str, str] | None = None,
+) -> tuple[bool, str, str]:
     try:
+        env = os.environ.copy()
+        if env_overrides:
+            env.update({k: v for k, v in env_overrides.items() if v})
         result = subprocess.run(
             args,
             input=sql_input,
             capture_output=True,
             text=True,
             check=False,
-            env=os.environ.copy(),
+            env=env,
         )
     except FileNotFoundError:
         return False, "", f"Command not found: {args[0]}"
@@ -46,6 +54,39 @@ def _detect_cmd(candidates: tuple[str, ...]) -> str | None:
         if shutil.which(cmd):
             return cmd
     return None
+
+
+def _build_pg_env_from_database_url(database_url: str) -> tuple[dict[str, str], str]:
+    """Build PG* env vars from DATABASE_URL to avoid exposing credentials in argv."""
+    parsed = urlparse(database_url)
+    env: dict[str, str] = {}
+
+    dbname = (parsed.path or "").lstrip("/") or "postgres"
+    env["PGDATABASE"] = dbname
+
+    if parsed.hostname:
+        env["PGHOST"] = parsed.hostname
+    if parsed.port:
+        env["PGPORT"] = str(parsed.port)
+    if parsed.username:
+        env["PGUSER"] = unquote(parsed.username)
+    if parsed.password:
+        env["PGPASSWORD"] = unquote(parsed.password)
+
+    query_params = parse_qs(parsed.query or "")
+    for key, env_key in {
+        "sslmode": "PGSSLMODE",
+        "sslrootcert": "PGSSLROOTCERT",
+        "sslcert": "PGSSLCERT",
+        "sslkey": "PGSSLKEY",
+        "sslcrl": "PGSSLCRL",
+        "target_session_attrs": "PGTARGETSESSIONATTRS",
+    }.items():
+        value = (query_params.get(key) or [""])[0]
+        if value:
+            env[env_key] = value
+
+    return env, dbname
 
 
 def _list_tables() -> list[str]:
@@ -212,6 +253,7 @@ def _execute_with_savepoint(cursor, statement: str) -> tuple[bool, Exception | N
 
 
 def get_postgres_backup_mode() -> tuple[str, str]:
+    pg_env, dbname = _build_pg_env_from_database_url(DATABASE_URL)
     pg_dump = _detect_cmd(("pg_dump", "pg_dump16", "pg_dump15", "pg_dump14"))
     if not pg_dump:
         return "fallback", "pg_dump not found; using internal data-only dump"
@@ -225,11 +267,12 @@ def get_postgres_backup_mode() -> tuple[str, str]:
         [
             pg_dump,
             "--dbname",
-            DATABASE_URL,
+            dbname,
             "--schema-only",
             "--no-owner",
             "--no-privileges",
-        ]
+        ],
+        env_overrides=pg_env,
     )
     if not probe_ok:
         probe_detail = (probe_err or "").strip() or "pg_dump probe failed"
@@ -241,6 +284,7 @@ def get_postgres_backup_mode() -> tuple[str, str]:
 
 
 def _generate_backup_sql_content() -> tuple[str, str]:
+    pg_env, dbname = _build_pg_env_from_database_url(DATABASE_URL)
     mode, detail = get_postgres_backup_mode()
     if mode == "full":
         pg_dump = _detect_cmd(("pg_dump", "pg_dump16", "pg_dump15", "pg_dump14"))
@@ -249,12 +293,13 @@ def _generate_backup_sql_content() -> tuple[str, str]:
                 [
                     pg_dump,
                     "--dbname",
-                    DATABASE_URL,
+                    dbname,
                     "--no-owner",
                     "--no-privileges",
                     "--format=plain",
                     "--encoding=UTF8",
-                ]
+                ],
+                env_overrides=pg_env,
             )
             if ok and out.strip():
                 return out, "full"
@@ -288,9 +333,14 @@ def restore_backup_from_sql(sql_content: str) -> bool:
             st.error(f"Failed to prepare schema for restore: {exc}")
             return False
 
+    pg_env, dbname = _build_pg_env_from_database_url(DATABASE_URL)
     psql = _detect_cmd(("psql", "psql16", "psql15", "psql14"))
     if psql:
-        ok, _, err = _run_command([psql, DATABASE_URL, "-v", "ON_ERROR_STOP=1"], sql_input=sql_content)
+        ok, _, err = _run_command(
+            [psql, "-d", dbname, "-v", "ON_ERROR_STOP=1"],
+            sql_input=sql_content,
+            env_overrides=pg_env,
+        )
         if ok:
             return True
         st.warning(f"psql failed, trying statement execution. Detail: {err.strip()}")
