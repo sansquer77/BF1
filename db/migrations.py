@@ -271,6 +271,7 @@ def run_migrations() -> None:
             add_login_attempts_ip_if_missing()
             add_penalidade_auto_percent_if_missing()
             create_usuarios_status_historico_if_missing()
+            create_hall_da_fama_table()
 
             for idx in INDICES.get("usuarios", []):
                 cursor.execute(idx)
@@ -312,8 +313,3 @@ def create_hall_da_fama_table() -> None:
         logger.error("Erro ao criar tabela hall_da_fama: %s", exc)
         raise
 
-
-try:
-    create_hall_da_fama_table()
-except Exception:
-    pass
