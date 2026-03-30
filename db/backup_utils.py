@@ -63,6 +63,49 @@ def _list_tables() -> list[str]:
         return [str(r[0]) for r in (c.fetchall() or []) if r and r[0]]
 
 
+def _order_tables_for_dump(tables: list[str]) -> list[str]:
+    """Order tables to reduce FK dependency issues during statement-based restores."""
+    preferred = [
+        # Bases sem dependências fortes
+        "usuarios",
+        "temporadas",
+        "circuitos_f1",
+        "pilotos",
+        "provas",
+        # Dependentes de provas
+        "resultados",
+        # Dependentes de usuarios + provas
+        "apostas",
+        "log_apostas",
+        "posicoes_participantes",
+        # Dependentes de usuarios
+        "usuarios_status_historico",
+        "hall_da_fama",
+        "championship_bets",
+        "championship_bets_log",
+        # Independentes restantes mais comuns
+        "championship_results",
+        "regras",
+        "login_attempts",
+    ]
+    lower_map = {t.lower(): t for t in tables}
+
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for key in preferred:
+        table_name = lower_map.get(key)
+        if table_name and table_name not in seen:
+            ordered.append(table_name)
+            seen.add(table_name)
+
+    for table_name in sorted(tables, key=str.lower):
+        if table_name not in seen:
+            ordered.append(table_name)
+            seen.add(table_name)
+
+    return ordered
+
+
 def _sql_literal(value: Any) -> str:
     if value is None:
         return "NULL"
@@ -81,7 +124,7 @@ def _build_data_only_sql() -> str:
         "BEGIN;",
     ]
 
-    tables = _list_tables()
+    tables = _order_tables_for_dump(_list_tables())
     if tables:
         trunc = ", ".join(_quote_identifier(t) for t in tables)
         lines.append(f"TRUNCATE TABLE {trunc} RESTART IDENTITY CASCADE;")
