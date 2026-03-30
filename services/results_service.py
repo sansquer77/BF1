@@ -2,7 +2,11 @@ import pandas as pd
 import json
 import ast
 from datetime import datetime
+import logging
 from db.db_utils import db_connect, get_provas_df, get_resultados_df
+
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_posicoes(posicoes_str: str) -> dict:
@@ -46,13 +50,18 @@ def salvar_resultado_prova(prova_id: int, posicoes: dict) -> bool:
         with db_connect() as conn:
             c = conn.cursor()
             c.execute(
-                'REPLACE INTO resultados (prova_id, posicoes) VALUES (?, ?)',
+                '''
+                INSERT INTO resultados (prova_id, posicoes)
+                VALUES (?, ?)
+                ON CONFLICT (prova_id) DO UPDATE SET
+                    posicoes = EXCLUDED.posicoes
+                ''',
                 (prova_id, str(posicoes))
             )
             conn.commit()
             return True
     except Exception as e:
-        print(f"Erro ao salvar resultado: {e}")
+        logger.exception("Erro ao salvar resultado da prova %s: %s", prova_id, e)
         return False
 
 def obter_resultados():

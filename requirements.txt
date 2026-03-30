@@ -8,7 +8,6 @@ extra-streamlit-components>=0.1.56
 streamlit-calendar>=1.4.0
 
 # Database
-# sqlite3 já vem com Python
 psycopg[binary]>=3.2.0
 psycopg-pool>=3.2.0
 
@@ -21,6 +20,7 @@ PyJWT>=2.8.0
 pandas>=2.2.0
 numpy>=1.26.0
 openpyxl>=3.1.0
+pydantic>=2.9.0
 
 # Visualização
 plotly>=5.18.0

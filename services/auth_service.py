@@ -1,6 +1,5 @@
 import jwt
 from datetime import datetime, timedelta, timezone
-import streamlit as st
 import os
 import logging
 import importlib
@@ -12,7 +11,7 @@ except ImportError:
 
 # Funções de hash/check de senha - importadas de db_utils para evitar duplicação
 # Re-exportadas aqui para manter compatibilidade com módulos que importam de auth_service
-from db.db_utils import db_connect, hash_password, check_password
+from db.db_utils import db_connect, get_table_columns, hash_password, check_password
 
 # Exportar explicitamente para manter compatibilidade
 __all__ = ['hash_password', 'check_password', 'autenticar_usuario', 'generate_token', 
@@ -26,22 +25,35 @@ _JWT_SECRET_LOGGED = False
 
 _COOKIE_MANAGER_INSTANCE = None
 _COOKIE_MANAGER_KEY = "bf1_auth_cookie_manager"
+_FALLBACK_COOKIE_STORE: dict[str, str] = {}
+
+
+def _get_session_store() -> dict:
+    """Return Streamlit session_state when available, else module-local fallback store."""
+    try:
+        st_mod = importlib.import_module("streamlit")
+        return st_mod.session_state
+    except Exception:
+        return _FALLBACK_COOKIE_STORE
 
 
 class _FallbackCookieManager:
     """Fallback simples quando extra_streamlit_components não está instalado."""
 
     def set(self, key, value, expires_at=None, options=None):
-        st.session_state[f"cookie_{key}"] = value
+        store = _get_session_store()
+        store[f"cookie_{key}"] = value
 
     def delete(self, key):
-        st.session_state.pop(f"cookie_{key}", None)
+        store = _get_session_store()
+        store.pop(f"cookie_{key}", None)
 
     def get_all(self):
         # Keep API compatible with CookieManager.get_all().
+        store = _get_session_store()
         return {
             k.replace("cookie_", "", 1): v
-            for k, v in st.session_state.items()
+            for k, v in store.items()
             if isinstance(k, str) and k.startswith("cookie_")
         }
 
@@ -273,8 +285,7 @@ def redefinir_senha_usuario(email: str):
     # Atualiza a senha no banco
     with db_connect() as conn:
         c = conn.cursor()
-        c.execute("PRAGMA table_info('usuarios')")
-        cols = [r[1] for r in c.fetchall()]
+        cols = get_table_columns(conn, 'usuarios')
         if 'must_change_password' in cols:
             c.execute(
                 "UPDATE usuarios SET senha_hash=?, must_change_password=1 WHERE email=?",
