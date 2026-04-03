@@ -2,7 +2,7 @@ import datetime
 import pandas as pd
 import streamlit as st
 
-from db.db_utils import db_connect
+from db.db_schema import db_connect
 from utils.helpers import render_page_header
 
 
@@ -19,30 +19,36 @@ def _load_access_logs(
     ip_contains: str,
     usuario_contains: str,
 ) -> pd.DataFrame:
-    where = ["DATE(created_at) >= ?", "DATE(created_at) <= ?"]
-    params: list[object] = [data_inicial.isoformat(), data_final.isoformat()]
+    start_ts = datetime.datetime.combine(data_inicial, datetime.time.min)
+    end_ts_exclusive = datetime.datetime.combine(
+        data_final + datetime.timedelta(days=1),
+        datetime.time.min,
+    )
+
+    where = ["created_at >= %s", "created_at < %s"]
+    params: list[object] = [start_ts, end_ts_exclusive]
 
     if perfil_sel != "Todos":
-        where.append("LOWER(COALESCE(perfil, '')) = ?")
+        where.append("LOWER(COALESCE(perfil, '')) = %s")
         params.append(perfil_sel.lower())
 
     if evento_sel != "Todos":
-        where.append("evento = ?")
+        where.append("evento = %s")
         params.append(evento_sel)
 
     if sucesso_sel == "Sucesso":
-        where.append("sucesso = ?")
+        where.append("sucesso = %s")
         params.append(True)
     elif sucesso_sel == "Falha":
-        where.append("sucesso = ?")
+        where.append("sucesso = %s")
         params.append(False)
 
     if ip_contains:
-        where.append("LOWER(COALESCE(ip_address, '')) LIKE ?")
+        where.append("LOWER(COALESCE(ip_address, '')) LIKE %s")
         params.append(f"%{ip_contains.lower()}%")
 
     if usuario_contains:
-        where.append("(LOWER(COALESCE(email, '')) LIKE ? OR LOWER(COALESCE(nome, '')) LIKE ?)")
+        where.append("(LOWER(COALESCE(email, '')) LIKE %s OR LOWER(COALESCE(nome, '')) LIKE %s)")
         token = f"%{usuario_contains.lower()}%"
         params.extend([token, token])
 
@@ -65,36 +71,48 @@ def _load_access_logs(
         ORDER BY created_at DESC, id DESC
     """
 
+    # pd.read_sql_query nao e compativel com psycopg3 (dict_row);
+    # usamos cursor manual e construimos o DataFrame a partir da lista de dicts.
     with db_connect() as conn:
-        return pd.read_sql_query(query, conn, params=tuple(params))
+        cur = conn.cursor()
+        cur.execute(query, params)
+        rows = cur.fetchall() or []
+
+    if not rows:
+        return pd.DataFrame(columns=[
+            "id", "created_at", "evento", "sucesso",
+            "user_id", "email", "nome", "perfil", "ip_address", "detalhes",
+        ])
+
+    return pd.DataFrame([dict(r) for r in rows])
 
 
 def _get_filter_options() -> tuple[list[str], list[str]]:
     with db_connect() as conn:
-        perfis_df = pd.read_sql_query(
+        cur = conn.cursor()
+
+        cur.execute(
             """
             SELECT DISTINCT LOWER(TRIM(COALESCE(perfil, ''))) AS perfil
             FROM access_logs
             WHERE perfil IS NOT NULL AND TRIM(COALESCE(perfil, '')) <> ''
             ORDER BY perfil
-            """,
-            conn,
+            """
         )
-        eventos_df = pd.read_sql_query(
+        perfis_rows = cur.fetchall() or []
+
+        cur.execute(
             """
             SELECT DISTINCT evento
             FROM access_logs
             WHERE evento IS NOT NULL AND TRIM(COALESCE(evento, '')) <> ''
             ORDER BY evento
-            """,
-            conn,
+            """
         )
+        eventos_rows = cur.fetchall() or []
 
-    perfis_series = perfis_df["perfil"] if "perfil" in perfis_df.columns else pd.Series(dtype="string")
-    eventos_series = eventos_df["evento"] if "evento" in eventos_df.columns else pd.Series(dtype="string")
-
-    perfis: list[str] = [str(p).strip() for p in perfis_series.fillna("").tolist() if str(p).strip()]
-    eventos: list[str] = [str(e).strip() for e in eventos_series.fillna("").tolist() if str(e).strip()]
+    perfis: list[str] = [str(r["perfil"]).strip() for r in perfis_rows if r and r.get("perfil")]
+    eventos: list[str] = [str(r["evento"]).strip() for r in eventos_rows if r and r.get("evento")]
     return perfis, eventos
 
 
@@ -148,7 +166,7 @@ def main() -> None:
         return
 
     total = len(df)
-    total_sucesso = int((df["sucesso"] == 1).sum())
+    total_sucesso = int((df["sucesso"] == True).sum())  # noqa: E712
     total_falha = total - total_sucesso
 
     m1, m2, m3 = st.columns(3)
@@ -162,6 +180,7 @@ def main() -> None:
     st.dataframe(
         df_show.rename(
             columns={
+                "id": "ID",
                 "created_at": "Data/Hora",
                 "evento": "Evento",
                 "sucesso": "Resultado",

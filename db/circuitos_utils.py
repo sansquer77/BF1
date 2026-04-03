@@ -153,7 +153,7 @@ def atualizar_base_circuitos(seasons: Iterable[str]) -> dict[str, int]:
             c.execute(
                 """
                 INSERT INTO circuitos_f1 (circuit_id, circuit_name, country, locality, aliases, atualizado_em)
-                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                 ON CONFLICT(circuit_id) DO UPDATE SET
                     circuit_name = excluded.circuit_name,
                     country = excluded.country,
@@ -181,14 +181,17 @@ def get_circuitos_df():
 
     ensure_circuitos_f1_table()
     with db_connect() as conn:
-        return pd.read_sql_query(
+        c = conn.cursor()
+        c.execute(
             """
             SELECT circuit_id, circuit_name, country, locality, aliases, atualizado_em
             FROM circuitos_f1
             ORDER BY circuit_name ASC
-            """,
-            conn,
+            """
         )
+        rows = c.fetchall()
+        records = [dict(r) for r in rows]
+        return pd.DataFrame(records)
 
 
 def get_temporadas_existentes_provas() -> list[str]:
@@ -202,5 +205,5 @@ def get_temporadas_existentes_provas() -> list[str]:
             return [str(datetime.now().year)]
 
         c.execute("SELECT DISTINCT temporada FROM provas WHERE temporada IS NOT NULL AND TRIM(temporada) <> '' ORDER BY temporada")
-        rows = [str(r[0]).strip() for r in c.fetchall() if r and r[0]]
+        rows = [str(r['temporada']).strip() for r in c.fetchall() if r and r['temporada']]
         return rows or [str(datetime.now().year)]

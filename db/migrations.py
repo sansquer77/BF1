@@ -56,6 +56,8 @@ def add_legacy_columns_if_missing() -> None:
                 _add_column_if_missing(cursor, conn, "pilotos", "equipe", "equipe TEXT DEFAULT ''")
                 _add_column_if_missing(cursor, conn, "pilotos", "status", "status TEXT DEFAULT 'Ativo'")
                 _add_column_if_missing(cursor, conn, "pilotos", "numero", "numero INTEGER DEFAULT 0")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_pilotos_nome_norm ON pilotos ((lower(nome)))")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_pilotos_nome_num_eq_norm ON pilotos ((lower(nome)), numero, (lower(equipe)), status)")
 
             if table_exists(conn, "provas"):
                 _add_column_if_missing(cursor, conn, "provas", "horario_prova", "horario_prova TEXT DEFAULT ''")
@@ -125,6 +127,47 @@ def add_penalidade_auto_percent_if_missing() -> None:
             conn.rollback()
 
 
+def harden_log_apostas_datetime_fields() -> None:
+    """Reforça integridade de data/horario sem gerar valores posteriores."""
+    pool = get_pool()
+    with pool.get_connection() as conn:
+        cursor = conn.cursor()
+        try:
+            if not table_exists(conn, "log_apostas"):
+                conn.commit()
+                return
+
+            cols = set(get_table_columns(conn, "log_apostas"))
+            if "horario" in cols:
+                cursor.execute("ALTER TABLE log_apostas ALTER COLUMN horario DROP DEFAULT")
+                cursor.execute("SELECT COUNT(*) AS qtd FROM log_apostas WHERE horario IS NULL")
+                horario_nulos = int((cursor.fetchone() or {}).get("qtd", 0))
+                if horario_nulos == 0:
+                    cursor.execute("ALTER TABLE log_apostas ALTER COLUMN horario SET NOT NULL")
+                else:
+                    logger.warning(
+                        "⚠️  log_apostas.horario possui %s registros nulos; corrija via import/ajuste de dados antes de aplicar NOT NULL",
+                        horario_nulos,
+                    )
+
+            if "data" in cols:
+                cursor.execute("ALTER TABLE log_apostas ALTER COLUMN data DROP DEFAULT")
+                cursor.execute("SELECT COUNT(*) AS qtd FROM log_apostas WHERE data IS NULL OR BTRIM(data) = ''")
+                data_vazia = int((cursor.fetchone() or {}).get("qtd", 0))
+                if data_vazia == 0:
+                    cursor.execute("ALTER TABLE log_apostas ALTER COLUMN data SET NOT NULL")
+                else:
+                    logger.warning(
+                        "⚠️  log_apostas.data possui %s registros vazios/nulos; corrija via import/ajuste de dados antes de aplicar NOT NULL",
+                        data_vazia,
+                    )
+
+            conn.commit()
+        except Exception as exc:
+            logger.warning("⚠️  Falha ao reforçar data/horario em log_apostas: %s", exc)
+            conn.rollback()
+
+
 def create_access_logs_table_if_missing() -> None:
     pool = get_pool()
     with pool.get_connection() as conn:
@@ -150,6 +193,8 @@ def create_access_logs_table_if_missing() -> None:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_access_logs_created_at ON access_logs(created_at)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_access_logs_perfil ON access_logs(perfil)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_access_logs_sucesso ON access_logs(sucesso)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_access_logs_created_at_id_desc ON access_logs(created_at DESC, id DESC)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_access_logs_perfil_created_at_desc ON access_logs(perfil, created_at DESC)")
             conn.commit()
         except Exception as exc:
             logger.debug("Erro ao criar access_logs: %s", exc)
@@ -253,6 +298,10 @@ def create_missing_tables_if_needed() -> None:
                 """
             )
 
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_championship_bets_season ON championship_bets(season)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_championship_bets_user_season ON championship_bets(user_id, season)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_championship_bets_log_user_season_time ON championship_bets_log(user_id, season, bet_time DESC)")
+
             cursor.execute(
                 f"""
                 CREATE TABLE IF NOT EXISTS log_apostas (
@@ -278,10 +327,87 @@ def create_missing_tables_if_needed() -> None:
                 """
             )
 
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_log_apostas_temporada_usuario_id_desc ON log_apostas(temporada, usuario_id, id DESC)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_log_apostas_temporada_id_desc ON log_apostas(temporada, id DESC)")
+
             conn.commit()
         except Exception as exc:
             logger.debug("Erro ao criar tabelas faltantes: %s", exc)
             conn.rollback()
+
+
+def fix_sequences() -> None:
+    """Ressincroniza sequences SERIAL/IDENTITY com o maior id real de cada tabela.
+
+    Necessário quando linhas foram inseridas com id explícito (ex: restore de
+    backup) sem atualizar a sequence, causando UniqueViolation no próximo INSERT.
+    É idempotente: se a sequence já estiver adiantada, o setval não a retrocede.
+    """
+    tables = [
+        "login_attempts",
+        "access_logs",
+        "usuarios",
+        "apostas",
+        "provas",
+        "resultados",
+        "pilotos",
+        "posicoes_participantes",
+        "log_apostas",
+        "championship_bets",
+        "championship_bets_log",
+        "championship_results",
+        "hall_da_fama",
+        "usuarios_status_historico",
+    ]
+    pool = get_pool()
+    with pool.get_connection() as conn:
+        cursor = conn.cursor()
+        for table in tables:
+            try:
+                if not table_exists(conn, table):
+                    continue
+                # Nem toda tabela usa coluna id (ex.: resultados usa prova_id).
+                # Nesses casos, não há sequence padrão para ressincronizar.
+                if "id" not in get_table_columns(conn, table):
+                    continue
+                # pg_get_serial_sequence funciona tanto para SERIAL quanto para
+                # GENERATED AS IDENTITY — retorna NULL se a tabela não tiver
+                # sequence associada à coluna id (ex: tabela sem PK serial).
+                cursor.execute(
+                    """
+                    SELECT pg_get_serial_sequence(%s, 'id') AS seq_name
+                    """,
+                    (table,),
+                )
+                row = cursor.fetchone()
+                seq_name = row["seq_name"] if row else None
+                if not seq_name:
+                    continue
+
+                cursor.execute(
+                    f"""
+                    SELECT setval(
+                        %s,
+                        GREATEST(
+                            (SELECT COALESCE(MAX(id), 0) FROM {table}),
+                            (SELECT last_value FROM {seq_name})
+                        ),
+                        true
+                    )
+                    """,
+                    (seq_name,),
+                )
+                logger.info("✓ Sequence `%s` ressincronizada para tabela `%s`", seq_name, table)
+            except Exception as exc:
+                logger.warning("⚠️  Falha ao ressincronizar sequence de `%s`: %s", table, exc)
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+        try:
+            conn.commit()
+        except Exception as exc:
+            logger.warning("⚠️  Falha no commit de fix_sequences: %s", exc)
 
 
 def run_migrations() -> None:
@@ -301,18 +427,18 @@ def run_migrations() -> None:
             add_login_attempts_action_if_missing()
             add_login_attempts_ip_if_missing()
             add_penalidade_auto_percent_if_missing()
+            harden_log_apostas_datetime_fields()
             create_access_logs_table_if_missing()
             create_usuarios_status_historico_if_missing()
             create_hall_da_fama_table()
 
-            for idx in INDICES.get("usuarios", []):
-                cursor.execute(idx)
-            for idx in INDICES.get("apostas", []):
-                cursor.execute(idx)
-            for idx in INDICES.get("provas", []):
-                cursor.execute(idx)
-            for idx in INDICES.get("resultados", []):
-                cursor.execute(idx)
+            if table_exists(conn, "posicoes_participantes"):
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_posicoes_participantes_usuario_temporada ON posicoes_participantes(usuario_id, temporada)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_posicoes_participantes_temporada_posicao ON posicoes_participantes(temporada, posicao)")
+
+            for table_indexes in INDICES.values():
+                for idx in table_indexes:
+                    cursor.execute(idx)
 
             conn.commit()
             logger.info("✓ Todas as migrations executadas com sucesso")
@@ -320,6 +446,28 @@ def run_migrations() -> None:
             logger.error("✗ Erro ao executar migrations: %s", exc)
             conn.rollback()
             raise
+
+    # -------------------------------------------------------------------
+    # Ressincroniza sequences de todas as tabelas.
+    # Corrige UniqueViolation causada por restore de backup com id explícito.
+    # Idempotente — seguro executar a cada startup.
+    # -------------------------------------------------------------------
+    fix_sequences()
+
+    # -------------------------------------------------------------------
+    # Migration de tipos nativos (DATE / TIMESTAMPTZ / JSONB / TEXT[])
+    # Executada separadamente para isolar seu rollback do bloco principal.
+    # É idempotente: pode ser chamada múltiplas vezes sem efeito colateral.
+    # -------------------------------------------------------------------
+    try:
+        from db.migrations_native_types import run_native_types_migration
+        run_native_types_migration()
+    except Exception as exc:
+        # Não aborta a inicialização do app se a migration de tipos falhar.
+        # As colunas TEXT originais continuam funcionando normalmente.
+        logger.warning(
+            "⚠️  Migration de tipos nativos não pôde ser concluída (app segue normal): %s", exc
+        )
 
 
 def create_hall_da_fama_table() -> None:
@@ -339,9 +487,10 @@ def create_hall_da_fama_table() -> None:
                 )
                 """
             )
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_hall_da_fama_usuario_temporada ON hall_da_fama(usuario_id, temporada)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_hall_da_fama_temporada_posicao ON hall_da_fama(temporada, posicao_final)")
             conn.commit()
             logger.info("✓ Tabela hall_da_fama criada com sucesso")
     except Exception as exc:
         logger.error("Erro ao criar tabela hall_da_fama: %s", exc)
         raise
-

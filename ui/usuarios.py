@@ -1,8 +1,14 @@
 import streamlit as st
 import pandas as pd
-from db.db_utils import get_usuarios_df, db_connect, registrar_historico_status_usuario
+from db.db_schema import db_connect
+from db.repo_bets import get_participantes_temporada_df
+from db.repo_users import (
+    get_usuarios_df,
+    registrar_historico_status_usuario,
+    update_user_password,
+    usuarios_status_historico_disponivel,
+)
 from services.auth_service import hash_password
-from db.db_utils import get_participantes_temporada_df, usuarios_status_historico_disponivel
 from services.email_service import enviar_email
 from datetime import datetime
 from utils.helpers import render_page_header
@@ -26,6 +32,9 @@ def _normalizar_df_usuarios(df: pd.DataFrame) -> pd.DataFrame:
 
     if "status" in df_norm.columns:
         df_norm["status"] = df_norm["status"].astype(str).str.strip().str.title()
+
+    if "faltas" in df_norm.columns:
+        df_norm["faltas"] = pd.to_numeric(df_norm["faltas"], errors="coerce").fillna(0).astype(int)
 
     return df_norm
 
@@ -60,11 +69,11 @@ def _get_pagamentos_temporada(temporada: str) -> dict[int, bool]:
     with db_connect() as conn:
         c = conn.cursor()
         c.execute(
-            "SELECT usuario_id, pago FROM financeiro_participantes WHERE temporada = ?",
+            "SELECT usuario_id, pago FROM financeiro_participantes WHERE temporada = %s",
             (str(temporada),)
         )
         rows = c.fetchall()
-    return {int(r[0]): bool(int(r[1])) for r in rows}
+    return {int(r['usuario_id']): bool(int(r['pago'])) for r in rows}
 
 
 def _salvar_pagamentos_temporada(temporada: str, pagamentos: dict[int, bool]) -> None:
@@ -75,7 +84,7 @@ def _salvar_pagamentos_temporada(temporada: str, pagamentos: dict[int, bool]) ->
             c.execute(
                 '''
                 INSERT INTO financeiro_participantes (usuario_id, temporada, pago, atualizado_em)
-                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
                 ON CONFLICT(usuario_id, temporada)
                 DO UPDATE SET pago = excluded.pago, atualizado_em = CURRENT_TIMESTAMP
                 ''',
@@ -89,14 +98,14 @@ def _get_valor_taxa_temporada(temporada: str) -> float:
     with db_connect() as conn:
         c = conn.cursor()
         c.execute(
-            "SELECT valor_taxa FROM financeiro_config_temporada WHERE temporada = ? LIMIT 1",
+            "SELECT valor_taxa FROM financeiro_config_temporada WHERE temporada = %s LIMIT 1",
             (str(temporada),),
         )
         row = c.fetchone()
     if not row:
         return 0.0
     try:
-        return float(row[0])
+        return float(row['valor_taxa'])
     except Exception:
         return 0.0
 
@@ -108,7 +117,7 @@ def _salvar_valor_taxa_temporada(temporada: str, valor_taxa: float) -> None:
         c.execute(
             '''
             INSERT INTO financeiro_config_temporada (temporada, valor_taxa, atualizado_em)
-            VALUES (?, ?, CURRENT_TIMESTAMP)
+            VALUES (%s, %s, CURRENT_TIMESTAMP)
             ON CONFLICT(temporada)
             DO UPDATE SET valor_taxa = excluded.valor_taxa, atualizado_em = CURRENT_TIMESTAMP
             ''',
@@ -132,8 +141,17 @@ def _render_gestao_usuarios_tab(perfil: str):
 
     st.markdown("### Usuários Cadastrados")
     with st.expander("Lista Completa de Usuários", expanded=True):
-        show_df = df[["id", "nome", "email", "perfil", "status"]].copy()
-        show_df.columns = ["ID", "Nome", "Email", "Perfil", "Status"]
+        # Colunas base sempre presentes
+        base_cols = ["id", "nome", "email", "perfil", "status"]
+        base_labels = ["ID", "Nome", "Email", "Perfil", "Status"]
+
+        # Inclui 'faltas' de forma defensiva: só se a coluna existir no banco real.
+        if "faltas" in df.columns:
+            base_cols.append("faltas")
+            base_labels.append("Faltas")
+
+        show_df = df[base_cols].copy()
+        show_df.columns = base_labels
         st.dataframe(show_df, width="stretch")
 
     st.markdown("### Editar Usuário")
@@ -155,6 +173,20 @@ def _render_gestao_usuarios_tab(perfil: str):
     status_index = status_opts.index(status_atual) if status_atual in status_opts else 0
     novo_status = st.selectbox("Status", status_opts, index=status_index)
 
+    # fix: campo de edição de faltas — ausente antes, forçando workaround
+    # de reimportar a tabela de usuários (o que quebrava as FK apostas.usuario_id).
+    # Renderiza de forma defensiva: só se a coluna existir no DataFrame.
+    novas_faltas = None
+    if "faltas" in df.columns:
+        faltas_atuais = int(user_row.get("faltas", 0) or 0)
+        novas_faltas = st.number_input(
+            "Faltas",
+            min_value=0,
+            value=faltas_atuais,
+            step=1,
+            help="Número de faltas do participante nesta temporada.",
+        )
+
     col1, col2 = st.columns(2)
 
     with col1:
@@ -162,10 +194,17 @@ def _render_gestao_usuarios_tab(perfil: str):
             status_anterior = str(user_row["status"]).strip()
             with db_connect() as conn:
                 c = conn.cursor()
-                c.execute(
-                    "UPDATE usuarios SET nome=?, email=?, perfil=?, status=? WHERE id=?",
-                    (novo_nome, novo_email, novo_perfil, novo_status, int(user_row["id"]))
-                )
+                if novas_faltas is not None:
+                    # Inclui faltas no UPDATE quando a coluna está disponível
+                    c.execute(
+                        "UPDATE usuarios SET nome=%s, email=%s, perfil=%s, status=%s, faltas=%s WHERE id=%s",
+                        (novo_nome, novo_email, novo_perfil, novo_status, int(novas_faltas), int(user_row["id"]))
+                    )
+                else:
+                    c.execute(
+                        "UPDATE usuarios SET nome=%s, email=%s, perfil=%s, status=%s WHERE id=%s",
+                        (novo_nome, novo_email, novo_perfil, novo_status, int(user_row["id"]))
+                    )
                 conn.commit()
             if status_anterior != novo_status:
                 alterado_por = st.session_state.get("user_id")
@@ -198,18 +237,13 @@ def _render_gestao_usuarios_tab(perfil: str):
                     st.error("Digite a nova senha.")
                 else:
                     nova_hash = hash_password(nova_senha)
-                    with db_connect() as conn:
-                        c = conn.cursor()
-                        c.execute("UPDATE usuarios SET senha_hash=? WHERE id=?", (nova_hash, int(user_row["id"])))
-                        conn.commit()
-                    st.success("Senha atualizada com sucesso!")
-                    st.session_state["alterar_senha"] = False
-                    
-                    # TODO: add email and password validation to user management
-                    # Use utils.validators in the user management interface to ensure that new
-                    # users are created with valid email formats and strong passwords. This
-                    # addresses vulnerabilities related to predictable/default credentials.
-                    st.rerun()
+                    ok = update_user_password(int(user_row["id"]), nova_hash, must_change_password=True)
+                    if ok:
+                        st.success("Senha atualizada com sucesso! O usuário deverá trocar a senha no próximo acesso.")
+                        st.session_state["alterar_senha"] = False
+                        st.rerun()
+                    else:
+                        st.error("Não foi possível atualizar a senha deste usuário.")
             if st.button("Cancelar alteração de senha"):
                 st.session_state["alterar_senha"] = False
 
@@ -221,7 +255,7 @@ def _render_gestao_usuarios_tab(perfil: str):
             else:
                 with db_connect() as conn:
                     c = conn.cursor()
-                    c.execute("DELETE FROM usuarios WHERE id=?", (int(user_row["id"]),))
+                    c.execute("DELETE FROM usuarios WHERE id=%s", (int(user_row["id"]),))
                     conn.commit()
                 st.success("Usuário excluído com sucesso!")
                 st.cache_data.clear()
@@ -239,14 +273,14 @@ def _render_gestao_usuarios_tab(perfil: str):
         if not nome_novo or not email_novo or not senha_novo:
             st.error("Preencha todos os campos obrigatórios.")
         else:
-            from services.auth_service import cadastrar_usuario
-            sucesso = cadastrar_usuario(nome_novo, email_novo, senha_novo, perfil=perfil_novo, status=status_novo)
-            if sucesso:
-                st.success("Usuário adicionado com sucesso!")
-                st.cache_data.clear()
-                st.rerun()
-            else:
-                st.error("Email já cadastrado.")
+          from services.auth_service import cadastrar_usuario
+          sucesso = cadastrar_usuario(nome_novo, email_novo, senha_novo, perfil=perfil_novo, status=status_novo)
+          if sucesso:
+              st.success("Usuário adicionado com sucesso!")
+              st.cache_data.clear()
+              st.rerun()
+          else:
+              st.error("Email já cadastrado.")
 
 
 def _render_gestao_financeira_tab():
@@ -317,7 +351,6 @@ def _render_gestao_financeira_tab():
         if not (mostrar_apenas_devendo and pago_atual):
             st.checkbox(
                 f"{part.get('nome', 'Participante')} ({email if email else 'sem e-mail'})",
-                value=pago_atual,
                 key=checkbox_key,
             )
             pago_atual = bool(st.session_state.get(checkbox_key, pago_atual))

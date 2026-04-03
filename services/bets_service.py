@@ -51,6 +51,15 @@ except ImportError:
     httpx = None
 
 
+def _fetch_df(conn, query: str, params: tuple | None = None) -> pd.DataFrame:
+    cur = conn.cursor()
+    cur.execute(query, params or ())
+    rows = cur.fetchall() or []
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame([dict(r) for r in rows])
+
+
 def _extrair_json_texto(raw_text: str) -> Optional[dict]:
     if not raw_text:
         return None
@@ -1014,9 +1023,9 @@ def salvar_aposta(
 
             if tipo_aposta == 0 or permitir_salvar_tardia:
                 if 'temporada' in aposta_cols:
-                    c.execute('DELETE FROM apostas WHERE usuario_id=? AND prova_id=? AND temporada=?', (usuario_id, prova_id, temporada))
+                    c.execute('DELETE FROM apostas WHERE usuario_id=%s AND prova_id=%s AND temporada=%s', (usuario_id, prova_id, temporada))
                 else:
-                    c.execute('DELETE FROM apostas WHERE usuario_id=? AND prova_id=?', (usuario_id, prova_id))
+                    c.execute('DELETE FROM apostas WHERE usuario_id=%s AND prova_id=%s', (usuario_id, prova_id))
 
                 data_envio = agora_sp.isoformat()
                 if 'temporada' in aposta_cols:
@@ -1024,7 +1033,7 @@ def salvar_aposta(
                         '''
                         INSERT INTO apostas
                         (usuario_id, prova_id, data_envio, pilotos, fichas, piloto_11, nome_prova, automatica, temporada)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                         ''',
                         (
                             usuario_id, prova_id, data_envio, ','.join(pilotos), ','.join(map(str, fichas)),
@@ -1036,7 +1045,7 @@ def salvar_aposta(
                         '''
                         INSERT INTO apostas
                         (usuario_id, prova_id, data_envio, pilotos, fichas, piloto_11, nome_prova, automatica)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                         ''',
                         (
                             usuario_id, prova_id, data_envio, ','.join(pilotos), ','.join(map(str, fichas)),
@@ -1529,11 +1538,17 @@ def gerar_aposta_automatica(usuario_id, prova_id, nome_prova, apostas_df, provas
     if not pilotos_ant:
         return False, "Não há dados válidos para gerar aposta automática."
         
+    # Usa `usuarios.faltas` como contador oficial de faltas por aposta automática.
+    # A 2a falta em diante deve acionar a penalidade dinamica de porcentagem.
+    faltas_atuais = 0
     with db_connect() as conn:
         c = conn.cursor()
-        c.execute('SELECT MAX(automatica) FROM apostas WHERE usuario_id=?', (usuario_id,))
-        max_auto = c.fetchone()[0] or 0
-        nova_auto = 1 if max_auto is None else max_auto + 1
+        cols_usuarios = get_table_columns(conn, 'usuarios')
+        if 'faltas' in cols_usuarios:
+            c.execute('SELECT COALESCE(faltas, 0) AS faltas FROM usuarios WHERE id=%s', (usuario_id,))
+            row = c.fetchone()
+            faltas_atuais = int((row or {}).get('faltas', 0) or 0)
+    nova_auto = faltas_atuais + 1
         
     sucesso = salvar_aposta(
         usuario_id, prova_id, pilotos_ant, fichas_ant, piloto_11_ant, nome_prova,
@@ -1541,7 +1556,21 @@ def gerar_aposta_automatica(usuario_id, prova_id, nome_prova, apostas_df, provas
         permitir_salvar_tardia=True
     )
     
-    return (True, "Aposta automática gerada!") if sucesso else (False, "Falha ao salvar.")
+    if not sucesso:
+        return False, "Falha ao salvar."
+
+    # Incrementa faltas somente apos efetivar a aposta automatica.
+    with db_connect() as conn:
+        c = conn.cursor()
+        cols_usuarios = get_table_columns(conn, 'usuarios')
+        if 'faltas' in cols_usuarios:
+            c.execute(
+                'UPDATE usuarios SET faltas = COALESCE(faltas, 0) + 1 WHERE id=%s',
+                (usuario_id,),
+            )
+            conn.commit()
+
+    return True, "Aposta automática gerada!"
 
 
 def gerar_aposta_sem_ideias(usuario_id, prova_id, nome_prova, temporada=None):
@@ -1779,19 +1808,19 @@ def salvar_classificacao_prova(p_id, df_c, temp=None):
         
         # Safeguard: limpar entradas existentes para esta prova e temporada
         if has_temporada:
-            c.execute('DELETE FROM posicoes_participantes WHERE prova_id=? AND temporada=?', (p_id, temp))
+            c.execute('DELETE FROM posicoes_participantes WHERE prova_id=%s AND temporada=%s', (p_id, temp))
         else:
-            c.execute('DELETE FROM posicoes_participantes WHERE prova_id=?', (p_id,))
+            c.execute('DELETE FROM posicoes_participantes WHERE prova_id=%s', (p_id,))
         
         for _, r in df_c.iterrows():
             if has_temporada:
                 c.execute(
-                    'INSERT INTO posicoes_participantes (prova_id, usuario_id, posicao, pontos, temporada) VALUES (?,?,?,?,?)',
+                    'INSERT INTO posicoes_participantes (prova_id, usuario_id, posicao, pontos, temporada) VALUES (%s,%s,%s,%s,%s)',
                     (p_id, int(r['usuario_id']), int(r['posicao']), float(r['pontos']), temp)
                 )
             else:
                 c.execute(
-                    'INSERT INTO posicoes_participantes (prova_id, usuario_id, posicao, pontos) VALUES (?,?,?,?)',
+                    'INSERT INTO posicoes_participantes (prova_id, usuario_id, posicao, pontos) VALUES (%s,%s,%s,%s)',
                     (p_id, int(r['usuario_id']), int(r['posicao']), float(r['pontos']))
                 )
         conn.commit()
@@ -1800,18 +1829,18 @@ def atualizar_classificacoes_todas_as_provas(temporada: Optional[str] = None):
     with db_connect() as conn:
         usrs = cast(
             pd.DataFrame,
-            pd.read_sql(
+            _fetch_df(
+                conn,
                 """
                 SELECT id
                 FROM usuarios
                 WHERE lower(trim(coalesce(status, ''))) = 'ativo'
                 """,
-                conn,
             ),
         )
-        provs = cast(pd.DataFrame, pd.read_sql('SELECT id, nome, data, tipo, temporada FROM provas', conn))
-        apts = cast(pd.DataFrame, pd.read_sql('SELECT usuario_id, prova_id, data_envio, pilotos, fichas, piloto_11, automatica, temporada FROM apostas', conn))
-        ress = cast(pd.DataFrame, pd.read_sql('SELECT prova_id, posicoes, abandono_pilotos FROM resultados', conn))
+        provs = cast(pd.DataFrame, _fetch_df(conn, 'SELECT id, nome, data, tipo, temporada FROM provas'))
+        apts = cast(pd.DataFrame, _fetch_df(conn, 'SELECT usuario_id, prova_id, data_envio, pilotos, fichas, piloto_11, automatica, temporada FROM apostas'))
+        ress = cast(pd.DataFrame, _fetch_df(conn, 'SELECT prova_id, posicoes, abandono_pilotos FROM resultados'))
         
         import ast
         # Se temporada for fornecida, processa apenas provas dessa temporada

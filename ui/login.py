@@ -46,7 +46,7 @@ def registrar_tentativa_login(email: str, sucesso: bool, ip_address: str = "LOCA
         cursor = conn.cursor()
         cursor.execute('''
             INSERT INTO login_attempts (email, sucesso, ip_address, action)
-            VALUES (?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s)
         ''', (email, sucesso, ip_address, action))
         conn.commit()
 
@@ -71,7 +71,7 @@ def registrar_evento_acesso(
                 INSERT INTO access_logs (
                     evento, sucesso, user_id, email, nome, perfil, ip_address, detalhes
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ''',
                 (
                     evento,
@@ -112,20 +112,20 @@ def obter_tentativas_recentes(
             SELECT COUNT(*) as total,
                    SUM(CASE WHEN sucesso IS NOT TRUE THEN 1 ELSE 0 END) as falhas
             FROM login_attempts
-            WHERE email = ? AND tentativa_em > ? AND action = ?
+            WHERE email = %s AND tentativa_em > %s AND action = %s
         ''', (email, tempo_limite, action))
         
         resultado = cursor.fetchone()
-        falhas = resultado[1] if resultado and resultado[1] else 0
+        falhas = resultado['falhas'] if resultado and resultado['falhas'] else 0
 
         cursor.execute('''
             SELECT SUM(CASE WHEN sucesso IS NOT TRUE THEN 1 ELSE 0 END) as falhas_ip
             FROM login_attempts
-            WHERE ip_address = ? AND tentativa_em > ? AND action = ?
+            WHERE ip_address = %s AND tentativa_em > %s AND action = %s
         ''', (ip_address, tempo_limite, action))
 
         resultado_ip = cursor.fetchone()
-        falhas_ip = resultado_ip[0] if resultado_ip and resultado_ip[0] else 0
+        falhas_ip = resultado_ip['falhas_ip'] if resultado_ip and resultado_ip['falhas_ip'] else 0
         
         # Bloqueado se tiver mais que MAX_LOGIN_ATTEMPTS falhas
         # Limite por IP mais permissivo para reduzir falso positivo em redes compartilhadas.
@@ -159,13 +159,69 @@ def limpar_tentativas_antigas():
         
         cursor.execute('''
             DELETE FROM login_attempts
-            WHERE tentativa_em < ?
+            WHERE tentativa_em < %s
         ''', (tempo_limite,))
         
         conn.commit()
 
 
 # ============ UI DE LOGIN ============
+
+def _injetar_autocomplete_login() -> None:
+    """Injeta atributos autocomplete nos inputs do form de login via JavaScript.
+
+    O Streamlit não expõe o atributo HTML `autocomplete` nos st.text_input,
+    o que impede que gerenciadores de senha (1Password, Bitwarden, etc.)
+    reconheçam o formulário e ofereçam preenchimento automático.
+
+    A injeção é feita via st.html com JavaScript habilitado (com fallback
+    para components.html em versões antigas), com um <script> que:
+    - aguarda o DOM ser montado (polling a cada 200ms, máximo 2s),
+    - localiza os inputs dentro do formulário `data-testid="stForm"`,
+    - atribui autocomplete="email" e autocomplete="current-password"
+      ao 1º e 2º inputs respectivamente.
+
+    Como st.html não usa iframe, o script atua diretamente sobre document.
+    """
+    script_html = """
+    <script>
+    (function() {
+        function applyAutocomplete() {
+            try {
+                var form = document.querySelector('[data-testid="stForm"]');
+                if (!form) return false;
+                var inputs = form.querySelectorAll('input');
+                if (inputs.length < 2) return false;
+                inputs[0].setAttribute('autocomplete', 'email');
+                inputs[0].setAttribute('name', 'email');
+                inputs[1].setAttribute('autocomplete', 'current-password');
+                inputs[1].setAttribute('name', 'password');
+                return true;
+            } catch(e) {
+                return false;
+            }
+        }
+        if (!applyAutocomplete()) {
+            var attempts = 0;
+            var interval = setInterval(function() {
+                attempts++;
+                if (applyAutocomplete() || attempts >= 10) {
+                    clearInterval(interval);
+                }
+            }, 200);
+        }
+    })();
+    </script>
+    """
+
+    if hasattr(st, "html"):
+        st.html(script_html, unsafe_allow_javascript=True)
+        return
+
+    import streamlit.components.v1 as components
+
+    components.html(script_html, height=0)
+
 
 def login_view():
     """Interface de login com rate limiting e segurança"""
@@ -205,12 +261,16 @@ def login_view():
                 width="stretch",
                 type="primary"
             )
+
+        # fix(1Password): injeta autocomplete="email" / "current-password" via JS
+        # após o render do formulário — gerenciadores de senha reconhecem o form.
+        _injetar_autocomplete_login()
         
         # ========== PROCESSAMENTO DO LOGIN ==========
         if submit_button:
             if not email or not senha:
                 st.error("❌ Por favor, preencha email e senha")
-                logger.warning(f"Tentativa de login com campos vazios")
+                logger.warning("Tentativa de login com campos vazios")
                 return
             try:
                 login_input = LoginInput(email=email, senha=senha)
@@ -295,6 +355,7 @@ def login_view():
                 return
             
             # Verificar senha com bcrypt
+            # fix(crítico): coluna real é `senha_hash` — confirmado via dump de produção.
             if not check_password(senha, usuario['senha_hash']):
                 tentativas_restantes = MAX_LOGIN_ATTEMPTS - falhas - 1
                 
@@ -384,7 +445,6 @@ def login_view():
             logger.info("Login bem-sucedido: %s perfil=%s", redact_identifier(email), usuario['perfil'])
 
             st.success(f"✅ Bem-vindo, {usuario['nome']}!")
-            st.balloons()
 
             # Rerun para carregar próxima página
             st.rerun()

@@ -13,10 +13,10 @@ except ImportError:
 
 # Funções de hash/check de senha - importadas de db_utils para evitar duplicação
 # Re-exportadas aqui para manter compatibilidade com módulos que importam de auth_service
-from db.db_utils import db_connect, get_table_columns, hash_password, check_password
+from db.db_utils import db_connect, get_table_columns, hash_password, check_password, get_user_by_id
 
 # Exportar explicitamente para manter compatibilidade
-__all__ = ['hash_password', 'check_password', 'autenticar_usuario', 'generate_token', 
+__all__ = ['hash_password', 'check_password', 'autenticar_usuario', 'generate_token',
            'decode_token', 'create_token', 'cadastrar_usuario', 'get_user_by_email',
            'get_user_by_id', 'set_auth_cookies', 'clear_auth_cookies', 'get_auth_cookie_token',
            'redefinir_senha_usuario', 'redefinir_senha_com_token']
@@ -93,14 +93,14 @@ def _get_jwt_secret() -> str:
     elif secret_from_env:
         secret = secret_from_env
         secret_source = "env"
-    
+
     # Verificar se está em ambiente de produção (Digital Ocean / Streamlit Cloud)
     is_production = (
-        os.environ.get("STREAMLIT_SHARING") or 
+        os.environ.get("STREAMLIT_SHARING") or
         os.environ.get("DIGITALOCEAN_APP_PLATFORM") or
         os.environ.get("PRODUCTION") == "true"
     )
-    
+
     if not secret:
         if is_production:
             logger.critical("JWT_SECRET não configurado em ambiente de produção!")
@@ -108,7 +108,7 @@ def _get_jwt_secret() -> str:
                 "ERRO CRÍTICO DE SEGURANÇA: JWT_SECRET não está configurado. "
                 "Configure a variável de ambiente JWT_SECRET."
             )
-        
+
         # 🔴 ERRO CRÍTICO - JWT_SECRET SEMPRE OBRIGATÓRIO
         logger.critical("🔴 JWT_SECRET não configurado - SEGURANÇA COMPROMETIDA!")
         raise RuntimeError(
@@ -143,9 +143,9 @@ def autenticar_usuario(email: str, senha: str):
     """Retorna o usuário autenticado (tupla de dados) ou None."""
     with db_connect() as conn:
         c = conn.cursor()
-        c.execute("SELECT id, nome, email, senha_hash, perfil, status FROM usuarios WHERE email=?", (email,))
+        c.execute("SELECT id, nome, email, senha, perfil, status FROM usuarios WHERE email=%s", (email,))
         user = c.fetchone()
-    if user and check_password(senha, user[3]):
+    if user and check_password(senha, user['senha']):
         return user
     return None
 
@@ -180,14 +180,25 @@ def decode_token(token: str):
 def cadastrar_usuario(nome: str, email: str, senha: str, perfil="participante", status="Ativo") -> bool:
     """Cria novo usuário, garantindo unicidade de email."""
     try:
-        senha_hash = hash_password(senha)
+        senha_hashed = hash_password(senha)
         with db_connect() as conn:
             c = conn.cursor()
-            c.execute(
-                'INSERT INTO usuarios (nome, email, senha_hash, perfil, status, faltas) VALUES (?, ?, ?, ?, ?, ?)',
-                (nome, email, senha_hash, perfil, status, 0)
-            )
-            user_id = c.lastrowid
+            cols = get_table_columns(conn, 'usuarios')
+            if 'faltas' in cols:
+                # Inserção compatível com PostgreSQL, retornando o id criado.
+                c.execute(
+                    'INSERT INTO usuarios (nome, email, senha, perfil, status, faltas) '
+                    'VALUES (%s, %s, %s, %s, %s, %s) RETURNING id',
+                    (nome, email, senha_hashed, perfil, status, 0)
+                )
+            else:
+                c.execute(
+                    'INSERT INTO usuarios (nome, email, senha, perfil, status) '
+                    'VALUES (%s, %s, %s, %s, %s) RETURNING id',
+                    (nome, email, senha_hashed, perfil, status)
+                )
+            row = c.fetchone()
+            user_id = row['id'] if row else None
             conn.commit()
         try:
             if isinstance(user_id, int):
@@ -202,6 +213,8 @@ def cadastrar_usuario(nome: str, email: str, senha: str, perfil="participante", 
             pass
         return True
     except Exception:
+        # fix #3: logar exceção para diagnóstico em vez de engolir silenciosamente
+        logger.exception("cadastrar_usuario falhou para email=%s", email)
         return False
 
 # --- BUSCA DE USUÁRIOS ---
@@ -209,21 +222,15 @@ def get_user_by_email(email: str):
     with db_connect() as conn:
         c = conn.cursor()
         c.execute(
-            "SELECT id, nome, email, senha_hash, perfil, status, faltas FROM usuarios WHERE email=?",
+            "SELECT id, nome, email, senha, perfil, status FROM usuarios WHERE email=%s",
             (email,)
         )
         user = c.fetchone()
     return user
 
-def get_user_by_id(user_id):
-    with db_connect() as conn:
-        c = conn.cursor()
-        c.execute(
-            "SELECT id, nome, email, perfil, status, faltas FROM usuarios WHERE id=?",
-            (user_id,)
-        )
-        user = c.fetchone()
-    return user
+# fix #4: get_user_by_id removido daqui — re-exportado de db_utils via import acima.
+# db_utils.get_user_by_id faz SELECT * retornando todas as colunas incluindo 'senha',
+# evitando inconsistência de contrato entre callers que acessam user['senha'].
 
 # --- GESTÃO DE COOKIES (para login) ---
 def set_auth_cookies(token, expires_minutes=JWT_EXP_MINUTES):
@@ -315,16 +322,16 @@ def redefinir_senha_usuario(email: str):
         c = conn.cursor()
         # Invalida tokens pendentes anteriores para o mesmo email.
         c.execute(
-            "UPDATE password_reset_tokens SET used_at=CURRENT_TIMESTAMP WHERE email=? AND used_at IS NULL",
+            "UPDATE password_reset_tokens SET used_at=CURRENT_TIMESTAMP WHERE email=%s AND used_at IS NULL",
             (email,),
         )
         c.execute(
-            "INSERT INTO password_reset_tokens (email, token_hash, expires_at) VALUES (?, ?, ?)",
+            "INSERT INTO password_reset_tokens (email, token_hash, expires_at) VALUES (%s, %s, %s)",
             (email, token_hash, expires_at),
         )
         conn.commit()
 
-    return True, (usuario[1], reset_token, RESET_TOKEN_EXP_MINUTES)
+    return True, (usuario['nome'], reset_token, RESET_TOKEN_EXP_MINUTES)
 
 
 def redefinir_senha_com_token(email: str, token: str, nova_senha: str):
@@ -338,10 +345,10 @@ def redefinir_senha_com_token(email: str, token: str, nova_senha: str):
             """
             SELECT id
             FROM password_reset_tokens
-            WHERE email = ?
-              AND token_hash = ?
+            WHERE email = %s
+              AND token_hash = %s
               AND used_at IS NULL
-              AND expires_at > ?
+              AND expires_at > %s
             ORDER BY id DESC
             LIMIT 1
             """,
@@ -351,19 +358,31 @@ def redefinir_senha_com_token(email: str, token: str, nova_senha: str):
         if not token_row:
             return False, "Token inválido ou expirado."
 
-        senha_hash = hash_password(nova_senha)
+        senha_hashed = hash_password(nova_senha)
         cols = get_table_columns(conn, 'usuarios')
         if 'must_change_password' in cols:
             c.execute(
-                "UPDATE usuarios SET senha_hash=?, must_change_password=0 WHERE email=?",
-                (senha_hash, email),
+                """
+                SELECT data_type
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'usuarios'
+                  AND column_name = 'must_change_password'
+                """
+            )
+            type_row = c.fetchone() or {}
+            data_type = str(type_row.get('data_type', '')).strip().lower()
+            must_change_value = False if data_type == 'boolean' else 0
+            c.execute(
+                "UPDATE usuarios SET senha=%s, must_change_password=%s WHERE email=%s",
+                (senha_hashed, must_change_value, email),
             )
         else:
-            c.execute("UPDATE usuarios SET senha_hash=? WHERE email=?", (senha_hash, email))
+            c.execute("UPDATE usuarios SET senha=%s WHERE email=%s", (senha_hashed, email))
 
         c.execute(
-            "UPDATE password_reset_tokens SET used_at=CURRENT_TIMESTAMP WHERE id=?",
-            (token_row[0],),
+            "UPDATE password_reset_tokens SET used_at=CURRENT_TIMESTAMP WHERE id=%s",
+            (token_row['id'],),
         )
         conn.commit()
 
@@ -386,14 +405,23 @@ def criar_master_se_nao_existir():
         return
     with db_connect() as conn:
         c = conn.cursor()
-        c.execute('SELECT COUNT(*) FROM usuarios WHERE perfil="master"')
-        existe = c.fetchone()[0] > 0
+        c.execute("SELECT COUNT(*) AS cnt FROM usuarios WHERE perfil = %s", ('master',))
+        existe = c.fetchone()['cnt'] > 0
         if not existe:
-            senha_hash = hash_password(senha)
-            c.execute(
-                'INSERT INTO usuarios (nome, email, senha_hash, perfil, status, faltas) VALUES (?, ?, ?, "master", "Ativo", 0)',
-                (nome, email, senha_hash)
-            )
+            senha_hashed = hash_password(senha)
+            cols = get_table_columns(conn, 'usuarios')
+            if 'faltas' in cols:
+                c.execute(
+                    "INSERT INTO usuarios (nome, email, senha, perfil, status, faltas) "
+                    "VALUES (%s, %s, %s, %s, %s, %s)",
+                    (nome, email, senha_hashed, 'master', 'Ativo', 0)
+                )
+            else:
+                c.execute(
+                    "INSERT INTO usuarios (nome, email, senha, perfil, status) "
+                    "VALUES (%s, %s, %s, %s, %s)",
+                    (nome, email, senha_hashed, 'master', 'Ativo')
+                )
             conn.commit()
 
 # Alias para compatibilidade

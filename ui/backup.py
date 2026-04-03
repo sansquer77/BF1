@@ -1,12 +1,14 @@
 import streamlit as st
-from db.backup_utils import (
+from db.backup_excel import (
+    download_tabela,
+    upload_tabela,
+)
+from db.backup_sql import (
     create_next_temporada,
     download_db,
-    download_tabela,
     get_postgres_backup_mode,
     list_temporadas,
     upload_db,
-    upload_tabela,
 )
 from utils.helpers import render_page_header
 
@@ -34,12 +36,23 @@ def main():
     - Exportar e importar tabelas específicas em Excel (.xlsx)
     """)
 
-    st.header("Backup/Restauração do banco completo")
-    col1, col2 = st.columns(2)
-    with col1:
-        download_db()
-    with col2:
+    st.header("Banco Completo (.sql)")
+    st.subheader("Operação segura")
+    download_db()
+
+    st.subheader("Operação crítica: restauração")
+    st.warning(
+        "A restauração substitui dados existentes. Confirme abaixo apenas quando tiver certeza."
+    )
+    confirmar_restore = st.checkbox(
+        "Entendo o impacto e desejo habilitar a restauração do banco completo",
+        value=False,
+        key="backup_confirm_restore",
+    )
+    if confirmar_restore:
         upload_db()
+    else:
+        st.info("Marque a confirmação para habilitar o upload de arquivo .sql de restauração.")
 
     st.divider()
     st.header("Backup/Restauração de tabelas específicas")

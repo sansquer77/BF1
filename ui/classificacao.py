@@ -9,10 +9,13 @@ import datetime as dt
 import ast
 from zoneinfo import ZoneInfo
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
-from db.db_utils import db_connect, get_participantes_temporada_df, get_provas_df, get_apostas_df, get_resultados_df, usuarios_status_historico_disponivel
+from db.db_schema import db_connect
+from db.repo_bets import get_apostas_df, get_participantes_temporada_df, get_posicoes_participantes_df
+from db.repo_races import get_provas_df, get_resultados_df
+from db.repo_users import usuarios_status_historico_disponivel
 from services.championship_service import get_championship_bets_df, get_final_results
 from services.rules_service import get_regras_aplicaveis
-from services.bets_service import calcular_pontuacao_lote, atualizar_classificacoes_todas_as_provas, _parse_datetime_sp
+from services.bets_scoring import _parse_datetime_sp, calcular_pontuacao_lote, atualizar_classificacoes_todas_as_provas
 from utils.helpers import render_page_header
 from utils.season_utils import get_default_season_index, get_season_options
 
@@ -63,7 +66,6 @@ def gerar_imagem_tabela_ajustada(df, colunas):
     tabela.set_fontsize(fonte_tabela)
     tabela.scale(1.15, 1.55)
 
-    # Melhora contraste e legibilidade no cabeçalho e no corpo da tabela.
     for (row, col), cell in tabela.get_celld().items():
         if row == 0:
             cell.set_text_props(weight='bold', color='white')
@@ -120,7 +122,6 @@ def gerar_imagem_prova(df_cruzada, prova_selecionada):
     table.set_fontsize(fonte_tabela)
     table.scale(1.2, 1.55)
 
-    # Padroniza contraste e leitura da imagem da prova específica.
     for (row, col), cell in table.get_celld().items():
         if row == 0:
             cell.set_text_props(weight='bold', color='white')
@@ -173,7 +174,7 @@ def main():
         st.info("Não há temporadas disponíveis para consulta no seu histórico de status.")
         return
     default_index = get_default_season_index(season_options, current_year=str(current_year))
-    
+
     season = st.selectbox("Temporada", season_options, index=default_index, key="classificacao_season")
     st.session_state['temporada'] = season
 
@@ -198,10 +199,14 @@ def main():
     apostas_df = get_apostas_df(season)
     resultados_df = get_resultados_df(season)
 
+    # Garante IDs únicos em provas_df (evita ValueError no set_index/to_dict)
+    if not provas_df.empty and provas_df['id'].duplicated().any():
+        provas_df = provas_df.drop_duplicates(subset='id', keep='first')
+
     participantes = usuarios_df[usuarios_df['nome'] != 'Master']
     provas_df = provas_df.sort_values('data')
     perfil_usuario = st.session_state.get("user_role", "usuario").strip().lower()
-    
+
     resultado_campeonato = get_final_results(season_int)
     championship_bets_map = {}
     if resultado_campeonato:
@@ -215,17 +220,15 @@ def main():
                 }
                 for _, row in championship_bets_df.iterrows()
             }
-    
+
     tabela_classificacao = []
     tabela_detalhada = []
 
-    # Carregar regras da temporada selecionada para bônus de campeonato
     regras_temporada = get_regras_aplicaveis(str(season), "Normal")
     pontos_campeao = regras_temporada.get('pontos_campeao', 150)
     pontos_vice = regras_temporada.get('pontos_vice', 100)
     pontos_equipe = regras_temporada.get('pontos_equipe', 80)
 
-    # Pré-calcular acertos de 11º e apostas no prazo
     acertos_11_por_usuario = {}
     apostas_no_prazo_por_usuario = {}
     apostas_latest = apostas_df.copy()
@@ -290,7 +293,7 @@ def main():
         apostas_part = apostas_part.sort_values(by='prova_id')
         pontos_part = calcular_pontuacao_lote(apostas_part, resultados_df, provas_df, temporada_descarte=season)
         total_provas = sum([p for p in pontos_part if p is not None])
-        
+
         bonus_campeao = 0
         bonus_vice = 0
         bonus_equipe = 0
@@ -312,7 +315,7 @@ def main():
         pontos_campeonato = bonus_campeao + bonus_vice + bonus_equipe
         acertos_11 = int(acertos_11_por_usuario.get(part['id'], 0))
         apostas_no_prazo = int(apostas_no_prazo_por_usuario.get(part['id'], 0))
-        
+
         tabela_classificacao.append({
             "Participante": part['nome'],
             "usuario_id": part['id'],
@@ -337,13 +340,13 @@ def main():
     if df_class.empty:
         st.info("Nenhuma pontuação disponível para a temporada selecionada.")
         return
-    
+
     df_class = df_class.sort_values(
         ["Total Geral", "Acertos 11", "Acertou Campeao", "Acertou Equipe", "Acertou Vice", "Apostas no Prazo"],
         ascending=[False, False, False, False, False, False]
     ).reset_index(drop=True)
     df_class['Posição'] = df_class.index + 1
-    
+
     provas_realizadas = provas_df[provas_df['id'].isin(resultados_df['prova_id'])]
     if len(provas_realizadas) > 1:
         penultima_prova_id = provas_realizadas.iloc[-2]['id']
@@ -351,7 +354,7 @@ def main():
         tabela_anterior = []
         for idx, part in participantes.iterrows():
             apostas_anteriores_raw = apostas_df[
-                (apostas_df['usuario_id'] == part['id']) & 
+                (apostas_df['usuario_id'] == part['id']) &
                 (apostas_df['prova_id'].isin(provas_ate_penultima))
             ]
             if isinstance(apostas_anteriores_raw, pd.Series):
@@ -361,7 +364,7 @@ def main():
             apostas_anteriores = apostas_anteriores.sort_values(by='prova_id')
             pontos_anteriores = calcular_pontuacao_lote(apostas_anteriores, resultados_df, provas_df)
             total_anteriores = sum([p for p in pontos_anteriores if p is not None])
-            
+
             tabela_anterior.append({
                 "Participante": part['nome'],
                 "usuario_id": part['id'],
@@ -388,17 +391,17 @@ def main():
         df_class['Movimentação'] = df_class.apply(movimento, axis=1)
     else:
         df_class['Movimentação'] = "Novo"
-    
+
     diferencas = [0]
     totals = df_class["Total Geral"].tolist()
     for i in range(1, len(totals)):
         diferencas.append(totals[i-1] - totals[i])
     df_class["Diferença"] = ["-" if i == 0 else formatar_brasileiro(d) for i, d in enumerate(diferencas)]
-    
+
     df_display = df_class.copy()
     for col in ["Pontos Provas", "Bônus Campeão", "Bônus Vice", "Bônus Equipe", "Pontos Campeonato", "Total Geral"]:
         df_display[col] = df_display[col].apply(lambda x: formatar_brasileiro(float(x)))
-    
+
     colunas_ordem = [
         "Posição",
         "Participante",
@@ -553,32 +556,33 @@ def main():
         st.plotly_chart(fig, width="stretch")
 
     st.subheader("Classificação de Cada Participante ao Longo do Campeonato")
-    with db_connect() as conn:
-        query = 'SELECT * FROM posicoes_participantes WHERE temporada = ?'
-        df_posicoes = pd.read_sql(query, conn, params=(season,))
-        fig_all = go.Figure()
-        for part in participantes['nome']:
-            u_id = participantes[participantes['nome'] == part].iloc[0]['id']
-            posicoes_part_raw = df_posicoes[df_posicoes['usuario_id'] == u_id]
-            if isinstance(posicoes_part_raw, pd.Series):
-                posicoes_part = pd.DataFrame([posicoes_part_raw])
-            else:
-                posicoes_part = posicoes_part_raw
-            posicoes_part = posicoes_part.sort_values(by='prova_id')
-            if not posicoes_part.empty:
-                x_vals = []
-                for pid in posicoes_part['prova_id']:
-                    p_name_arr = provas_df[provas_df['id'] == pid]['nome'].values
-                    x_vals.append(p_name_arr[0] if len(p_name_arr) > 0 else f"ID {pid}")
-                fig_all.add_trace(go.Scatter(
-                    x=x_vals,
-                    y=posicoes_part['posicao'],
-                    mode='lines+markers',
-                    name=part
-                ))
-        fig_all.update_yaxes(autorange="reversed")
-        fig_all.update_layout(xaxis_title="Prova", yaxis_title="Posição", legend_title="Participante")
-        st.plotly_chart(fig_all, width="stretch")
+    # fix #5: substituir query raw por helper db_utils — elimina conexão extra e duplicação de SQL
+    df_posicoes = get_posicoes_participantes_df(season)
+    fig_all = go.Figure()
+    for part in participantes['nome']:
+        u_id = participantes[participantes['nome'] == part].iloc[0]['id']
+        if df_posicoes.empty:
+            continue
+        posicoes_part_raw = df_posicoes[df_posicoes['usuario_id'] == u_id]
+        if isinstance(posicoes_part_raw, pd.Series):
+            posicoes_part = pd.DataFrame([posicoes_part_raw])
+        else:
+            posicoes_part = posicoes_part_raw
+        posicoes_part = posicoes_part.sort_values(by='prova_id')
+        if not posicoes_part.empty:
+            x_vals = []
+            for pid in posicoes_part['prova_id']:
+                p_name_arr = provas_df[provas_df['id'] == pid]['nome'].values
+                x_vals.append(p_name_arr[0] if len(p_name_arr) > 0 else f"ID {pid}")
+            fig_all.add_trace(go.Scatter(
+                x=x_vals,
+                y=posicoes_part['posicao'],
+                mode='lines+markers',
+                name=part
+            ))
+    fig_all.update_yaxes(autorange="reversed")
+    fig_all.update_layout(xaxis_title="Prova", yaxis_title="Posição", legend_title="Participante")
+    st.plotly_chart(fig_all, width="stretch")
 
 if __name__ == "__main__":
     main()
