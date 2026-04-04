@@ -2,10 +2,21 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from typing import Optional
-from db.db_schema import db_connect, get_table_columns
-from db.repo_bets import get_apostas_df, get_participantes_temporada_df
-from db.repo_races import get_provas_df, get_resultados_df
-from db.repo_users import usuarios_status_historico_disponivel
+from services.data_access_core import (
+    db_connect,
+    get_table_columns,
+)
+from services.data_access_apostas import (
+    get_apostas_df,
+    get_participantes_temporada_df,
+)
+from services.data_access_provas import (
+    get_provas_df,
+    get_resultados_df,
+)
+from services.data_access_auth import (
+    usuarios_status_historico_disponivel,
+)
 from services.rules_service import get_regras_aplicaveis
 from utils.helpers import render_page_header
 from utils.season_utils import get_season_options, get_default_season_index
@@ -89,8 +100,9 @@ def _plot_colunas(df: pd.DataFrame, x_col: str, y_col: str, title: str) -> None:
     st.plotly_chart(fig, width="stretch")
 
 
-def _is_participante() -> bool:
-    return str(st.session_state.get("user_role", "participante")).strip().lower() == "participante"
+def _is_restricted_individual_profile() -> bool:
+    role = str(st.session_state.get("user_role", "participante")).strip().lower()
+    return role in {"participante", "inativo"}
 
 
 def _get_logged_user_name() -> str:
@@ -309,9 +321,13 @@ def main():
     apostas_pilotos = get_apostas_por_piloto(season, participantes_df)
     df_11 = get_distribuicao_piloto_11(season, participantes_df)
 
-    participante_only_mode = _is_participante()
+    participante_only_mode = _is_restricted_individual_profile()
     participante_logado = _get_logged_user_name()
     participante_logado_id = _get_logged_user_id()
+
+    if participante_only_mode and not participante_logado and participante_logado_id is None:
+        st.warning("Não foi possível identificar o usuário logado para limitar as análises individuais.")
+        return
 
     def _apply_participante_scope(df: pd.DataFrame) -> pd.DataFrame:
         if df.empty:

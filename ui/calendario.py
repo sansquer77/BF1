@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 from streamlit_calendar import calendar
-from db.repo_races import get_provas_df
+from services.data_access_provas import get_provas_df
 from utils.helpers import render_page_header
 from utils.season_utils import get_default_season_index, get_season_options
 
@@ -76,16 +76,34 @@ def main():
     render_page_header(st, "Calendário da Temporada")
 
     temporadas = get_season_options()
+    temporada_atual = str(datetime.now().year)
+    user_status = str(st.session_state.get("user_status", "")).strip().lower()
+    if user_status and user_status != "ativo":
+        if temporada_atual not in temporadas:
+            temporadas = sorted(set([*temporadas, temporada_atual]))
+
     if not temporadas:
         st.info("Não há temporadas disponíveis para consulta no seu histórico de status.")
         return
-    default_index = get_default_season_index(temporadas)
 
-    temporada = st.selectbox("Temporada", temporadas, index=default_index, key="calendario_temporada")
+    entering_calendar_page = st.session_state.get("_previous_page") != st.session_state.get("_current_page")
+    selected_temporada = st.session_state.get("calendario_temporada")
 
-    provas_df = get_provas_df(temporada)
+    if entering_calendar_page and temporada_atual in temporadas:
+        st.session_state["calendario_temporada"] = temporada_atual
+    elif selected_temporada not in temporadas:
+        if temporada_atual in temporadas:
+            st.session_state["calendario_temporada"] = temporada_atual
+        else:
+            default_index = get_default_season_index(temporadas)
+            st.session_state["calendario_temporada"] = temporadas[default_index]
+
+    temporada = st.selectbox("Temporada", temporadas, key="calendario_temporada")
+
+    # Exibe calendário global com provas de todas as temporadas.
+    provas_df = get_provas_df()
     if provas_df.empty:
-        st.info("Nenhuma prova cadastrada para a temporada selecionada.")
+        st.info("Nenhuma prova cadastrada.")
         return
 
     df = provas_df.copy()
@@ -134,6 +152,15 @@ def main():
         now_dt = datetime.now()
 
         df_horario = df.copy()
+        if 'temporada' in df_horario.columns:
+            df_horario = df_horario[
+                df_horario['temporada'].astype(str).str.strip() == str(temporada).strip()
+            ]
+
+        if df_horario.empty:
+            st.info("Nenhuma prova cadastrada para a temporada selecionada.")
+            return
+
         df_horario["limite_dt"] = df_horario.apply(
             lambda row: _build_limite_datetime(row.get("data_dt"), row.get("horario_prova")),
             axis=1,

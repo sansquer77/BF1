@@ -1,8 +1,12 @@
 import streamlit as st
 import pandas as pd
-from db.db_schema import db_connect
-from db.repo_bets import get_participantes_temporada_df
-from db.repo_users import (
+from services.data_access_core import (
+    db_connect,
+)
+from services.data_access_apostas import (
+    get_participantes_temporada_df,
+)
+from services.data_access_auth import (
     get_usuarios_df,
     registrar_historico_status_usuario,
     update_user_password,
@@ -80,15 +84,19 @@ def _salvar_pagamentos_temporada(temporada: str, pagamentos: dict[int, bool]) ->
     _ensure_gestao_financeira_table()
     with db_connect() as conn:
         c = conn.cursor()
-        for usuario_id, pago in pagamentos.items():
-            c.execute(
+        batch_values = [
+            (int(usuario_id), str(temporada), 1 if pago else 0)
+            for usuario_id, pago in pagamentos.items()
+        ]
+        if batch_values:
+            c.executemany(
                 '''
                 INSERT INTO financeiro_participantes (usuario_id, temporada, pago, atualizado_em)
                 VALUES (%s, %s, %s, CURRENT_TIMESTAMP)
                 ON CONFLICT(usuario_id, temporada)
                 DO UPDATE SET pago = excluded.pago, atualizado_em = CURRENT_TIMESTAMP
                 ''',
-                (int(usuario_id), str(temporada), 1 if pago else 0)
+                batch_values,
             )
         conn.commit()
 
@@ -163,7 +171,7 @@ def _render_gestao_usuarios_tab(perfil: str):
     # Campos de edição
     novo_nome = st.text_input("Nome", user_row["nome"])
     novo_email = st.text_input("Email", user_row["email"])
-    perfis = ["participante", "admin", "master"]
+    perfis = ["participante", "inativo", "admin", "master"]
     perfil_atual = str(user_row.get("perfil", "participante")).strip().lower()
     perfil_index = perfis.index(perfil_atual) if perfil_atual in perfis else 0
     novo_perfil = st.selectbox("Perfil", perfis, index=perfil_index)
@@ -266,7 +274,7 @@ def _render_gestao_usuarios_tab(perfil: str):
     nome_novo = st.text_input("Nome completo", key="novo_nome")
     email_novo = st.text_input("Email", key="novo_email")
     senha_novo = st.text_input("Senha", type="password", key="nova_senha")
-    perfil_novo = st.selectbox("Perfil", ["participante", "admin", "master"], key="novo_perfil")
+    perfil_novo = st.selectbox("Perfil", ["participante", "inativo", "admin", "master"], key="novo_perfil")
     status_novo = st.selectbox("Status", ["Ativo", "Inativo"], key="novo_status")
 
     if st.button("Adicionar usuário"):
