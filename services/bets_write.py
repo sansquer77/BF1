@@ -15,6 +15,7 @@ from typing import Callable, Optional, Union, cast
 import pandas as pd
 
 from db.db_schema import db_connect, get_table_columns
+from db.migrations_native_types import sync_aposta_native
 from db.repo_bets import get_apostas_df
 from db.repo_races import get_horario_prova, get_pilotos_df, get_provas_df, get_resultados_df
 from db.repo_users import get_user_by_id
@@ -754,6 +755,7 @@ def salvar_aposta(
                 temporada = str(datetime.now().year)
 
             if tipo_aposta == 0 or permitir_salvar_tardia:
+                aposta_id_inserida = None
                 if "temporada" in aposta_cols:
                     c.execute("DELETE FROM apostas WHERE usuario_id=%s AND prova_id=%s AND temporada=%s", (usuario_id, prova_id, temporada))
                 else:
@@ -779,6 +781,10 @@ def salvar_aposta(
                             temporada,
                         ),
                     )
+                    c.execute(
+                        "SELECT id FROM apostas WHERE usuario_id=%s AND prova_id=%s AND temporada=%s ORDER BY id DESC LIMIT 1",
+                        (usuario_id, prova_id, temporada),
+                    )
                 else:
                     c.execute(
                         """
@@ -797,6 +803,16 @@ def salvar_aposta(
                             automatica,
                         ),
                     )
+                    c.execute(
+                        "SELECT id FROM apostas WHERE usuario_id=%s AND prova_id=%s ORDER BY id DESC LIMIT 1",
+                        (usuario_id, prova_id),
+                    )
+
+                row_aposta = c.fetchone()
+                if row_aposta:
+                    aposta_id_inserida = row_aposta.get("id") if hasattr(row_aposta, "get") else row_aposta[0]
+                if aposta_id_inserida is not None:
+                    sync_aposta_native(conn, int(aposta_id_inserida))
             else:
                 _report_error("Aposta fora do horário limite.")
                 return False
